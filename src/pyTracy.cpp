@@ -32,7 +32,7 @@ void print_current_function_name(PyFrameObject* frame, const char* message = nul
 	PyCodeObject* code = PyFrame_GetCode(frame);
 	const char* fileName = PyUnicode_AsUTF8(code->co_filename);
 
-	const char* funcname = PyUnicode_AsUTF8(frame->f_code->co_name);
+	const char* funcname = PyUnicode_AsUTF8(code->co_name);
 	const int line = PyFrame_GetLineNumber(frame);
 
 	// print indent
@@ -47,9 +47,11 @@ void print_current_function_name(PyFrameObject* frame, const char* message = nul
 	}
 
 // 
-	printf(" PY %d - %d: Tracy %d ", frame->f_code->co_stacksize, get_frame_stack_size(frame) , tracy_stack_index);
+	printf(" PY %d - %d: Tracy %d ", code->co_stacksize, get_frame_stack_size(frame) , tracy_stack_index);
 	printf("%s %s %d", fileName, funcname, line);
 	printf("\n");
+
+	Py_DECREF(code);
 }
 
 int trace_function(PyObject* obj, PyFrameObject* frame, int what, PyObject *arg)
@@ -62,8 +64,7 @@ int trace_function(PyObject* obj, PyFrameObject* frame, int what, PyObject *arg)
 
 			PyCodeObject* code = PyFrame_GetCode(frame);
 			const char* fileName = PyUnicode_AsUTF8(code->co_filename);
-
-			const char* funcname = PyUnicode_AsUTF8(frame->f_code->co_name);
+			const char* funcname = PyUnicode_AsUTF8(code->co_name);
 			const int line = PyFrame_GetLineNumber(frame);
 
 			struct ___tracy_source_location_data* source_location = NULL;
