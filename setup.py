@@ -57,13 +57,18 @@ class CustomInstall(install):
 	def run(self):
 		super().run()
 
+if os.name == 'nt':
+extra_link_args = []
 extra_link_args = []
 
 if os.name == 'nt':
 	pass
-else:
-	extra_link_args = ["-Wl", "--no-undefined", "-ldl", "-lm"]
+	extra_link_args = []
 
+if os.name == 'nt':
+	pass
+else:
+	extra_link_args = ["-Wl,--no-undefined", "-ldl", "-lm"]
 
 # Define the custom extension module
 extension = Extension(
