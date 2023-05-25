@@ -5,13 +5,13 @@
 #include <TracyC.h>
 
 static PyMethodDef CountingMethods[] = {
-	//   {"primecounter", py_primecounter, METH_VARARGS, "Function for counting primes in a range in c"},
 	{NULL, NULL, 0, NULL}
 };
 
 static TracyCZoneCtx tracy_stack [1000000] = {};
 static size_t tracy_stack_index = 0;
 static struct ___tracy_source_location_data source_location_list [1000000] = {};
+static size_t source_location_index = 0;
 
 int trace_function(PyObject* obj, PyFrameObject *frame, int what, PyObject *arg)
 {
@@ -27,11 +27,24 @@ int trace_function(PyObject* obj, PyFrameObject *frame, int what, PyObject *arg)
 			PyFrameObject* frame = state->frame;
 
 			const char* funcname = PyUnicode_AsUTF8(frame->f_code->co_name);
-			// const int line = PyCode_Addr2Line(frame->f_code, frame->f_lasti);
 			const int line = PyFrame_GetLineNumber(frame);
 
-			// struct ___tracy_source_location_data source_location;
-			struct ___tracy_source_location_data* source_location = &source_location_list[tracy_stack_index];
+			struct ___tracy_source_location_data* source_location = NULL;
+
+			for (size_t i = 0; i < source_location_index; i++)
+			{
+				if (source_location_list[i].line == line && strcmp(source_location_list[i].file, fileName) == 0)
+				{
+					source_location = &source_location_list[i];
+					break;
+				}
+			}
+
+			if (source_location == NULL)
+			{
+				source_location = &source_location_list[source_location_index];
+				source_location_index++;
+			}
 
 			source_location->name = funcname;
 			source_location->function = funcname;
@@ -52,9 +65,6 @@ int trace_function(PyObject* obj, PyFrameObject *frame, int what, PyObject *arg)
 			break;
 		case PyTrace_RETURN:
 		{
-			// PyCodeObject* code = PyFrame_GetCode(frame);
-			// char* fileName = PyUnicode_AsUTF8(code->co_filename);
-
 			tracy_stack_index--;
 			___tracy_emit_zone_end(tracy_stack[tracy_stack_index]);
 
@@ -81,7 +91,7 @@ static struct PyModuleDef pyTracyModule = {
 	CountingMethods
 };
 
-PyMODINIT_FUNC PyInit_PyTracy(void) {
+PyMODINIT_FUNC PyInit_pytracy(void) {
 	// ___tracy_startup_profiler();
 
 	PyEval_SetProfile(trace_function, NULL);

@@ -1,25 +1,32 @@
 print("Before import")
 
-import PyTracy
+import pytracy
 
 import time
+import numpy as np
 
 def a(i):
-	# time.sleep(0.1)
-	i -= 1
-	if i == 0:
-		return
-	else:
-		a(i)
+	b(i)
+
+def b(i):
+	for j in range(i):
+		c(j)
+
+def c(i):
+	pass
 
 i = 0
 
 while True:
 	i += 1
-	print(i)
+	# print(i)
 	a(10)
 
-	time.sleep(0.1)
+	# Do numpy stuff
+	np.random.rand(100, 100)
+
+
+	# time.sleep(0.1)
 
 # for i in range(100):
 # 	a(100)
