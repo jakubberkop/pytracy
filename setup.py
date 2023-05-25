@@ -62,7 +62,7 @@ extra_link_args = []
 if os.name == 'nt':
 	pass
 else:
-	extra_link_args.append("-Wl,--no-undefined")
+	extra_link_args = ["-Wl", "--no-undefined", "-ldl", "-lm"]
 
 
 # Define the custom extension module
