@@ -13,18 +13,55 @@ static size_t tracy_stack_index = 0;
 static struct ___tracy_source_location_data source_location_list [1000000] = {};
 static size_t source_location_index = 0;
 
-int trace_function(PyObject* obj, PyFrameObject *frame, int what, PyObject *arg)
+uint64_t get_frame_stack_size(PyFrameObject* frame)
+{
+	PyFrameObject * back = PyFrame_GetBack(frame);
+
+	if (back == NULL)
+	{
+		return 0;
+	}
+
+	uint64_t size = get_frame_stack_size(back) + 1;
+	Py_DECREF(back);
+	return size;
+}
+
+void print_current_function_name(PyFrameObject* frame, const char* message = nullptr)
+{
+	PyCodeObject* code = PyFrame_GetCode(frame);
+	const char* fileName = PyUnicode_AsUTF8(code->co_filename);
+
+	const char* funcname = PyUnicode_AsUTF8(frame->f_code->co_name);
+	const int line = PyFrame_GetLineNumber(frame);
+
+	// print indent
+	// for (int i = 0; i < tracy_stack_index; i++)
+	// {
+	// 	printf("  ");
+	// }
+
+	if (message != nullptr)
+	{
+		printf("%s", message);
+	}
+
+// 
+	printf(" PY %d - %d: Tracy %d ", frame->f_code->co_stacksize, get_frame_stack_size(frame) , tracy_stack_index);
+	printf("%s %s %d", fileName, funcname, line);
+	printf("\n");
+}
+
+int trace_function(PyObject* obj, PyFrameObject* frame, int what, PyObject *arg)
 {
 	switch (what)
 	{
 		case PyTrace_CALL:
 		{
+			print_current_function_name(frame, "Call     ");
 
 			PyCodeObject* code = PyFrame_GetCode(frame);
 			const char* fileName = PyUnicode_AsUTF8(code->co_filename);
-
-			PyThreadState* state = PyThreadState_GET();
-			PyFrameObject* frame = state->frame;
 
 			const char* funcname = PyUnicode_AsUTF8(frame->f_code->co_name);
 			const int line = PyFrame_GetLineNumber(frame);
@@ -45,7 +82,6 @@ int trace_function(PyObject* obj, PyFrameObject *frame, int what, PyObject *arg)
 				source_location = &source_location_list[source_location_index];
 				source_location_index++;
 			}
-
 			source_location->name = funcname;
 			source_location->function = funcname;
 			source_location->file = fileName;
@@ -60,21 +96,34 @@ int trace_function(PyObject* obj, PyFrameObject *frame, int what, PyObject *arg)
 			break;
 		}
 		case PyTrace_EXCEPTION:
+			print_current_function_name(frame, "Exception");
 			break;
 		case PyTrace_LINE:
 			break;
 		case PyTrace_RETURN:
 		{
+			print_current_function_name(frame, "Return   ");
+
+			if (tracy_stack_index == 0)
+			{
+				printf("ERROR: tracy_stack_index == 0\n");
+				break;
+			}
+
+
 			tracy_stack_index--;
 			___tracy_emit_zone_end(tracy_stack[tracy_stack_index]);
 
 			break;
 		}
 		case PyTrace_C_CALL:
+			print_current_function_name(frame, "C_Call   ");
 			break;
 		case PyTrace_C_EXCEPTION:
+			print_current_function_name(frame, "C_Exc    ");
 			break;
 		case PyTrace_C_RETURN:
+			print_current_function_name(frame, "C_Ret    ");
 			break;
 		case PyTrace_OPCODE:
 			break;
@@ -85,22 +134,13 @@ int trace_function(PyObject* obj, PyFrameObject *frame, int what, PyObject *arg)
 
 static struct PyModuleDef pyTracyModule = {
 	PyModuleDef_HEAD_INIT,
-  	"pytracy", // module name
-	"C library for counting fast",
+  	"pytracy",
+	"Tracy Profiler bindings for Python",
 	-1,
 	CountingMethods
 };
 
 PyMODINIT_FUNC PyInit_pytracy(void) {
-	// ___tracy_startup_profiler();
-
 	PyEval_SetProfile(trace_function, NULL);
-
-	// Log using python logging module
-	// PyObject *logging = PyImport_ImportModule("logging");
-	// PyObject *log = PyObject_GetAttrString(logging, "info");
-	// PyObject *args = Py_BuildValue("(s)", "Hello from C");
-	// PyObject_CallObject(log, args);
-
 	return PyModule_Create(&pyTracyModule);
 };
