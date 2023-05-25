@@ -76,12 +76,16 @@ jobs:
       uses: actions/download-artifact@v2
       with:
         name: dist-windows
+        path: dist-windows
     - name: Download artifacts
       uses: actions/download-artifact@v2
       with:
         name: dist-ubuntu
-    - name: show all downloaded files
-      run: find .
+        path: dist-ubuntu
+    - name: Merge artifacts
+      run: |
+        mv dist-windows/* dist/
+        mv dist-ubuntu/* dist/
     - name: Publish package
       uses: pypa/gh-action-pypi-publish@27b31702a0e7fc50959f5ad993c78deac1bdfc29
       with:
