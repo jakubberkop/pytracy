@@ -63,8 +63,10 @@ jobs:
 
     - name: Build wheels
       uses: pypa/cibuildwheel@v2.12.3
+      env:
+        CIBW_BUILD: cp311-*
 
-      # - name: Build manylinux Python wheels
+    # - name: Build manylinux Python wheels
     #   uses: RalfG/python-wheels-manylinux-build
     #   with:
     #     python-versions: 'cp310-cp310 cp311-cp311'
