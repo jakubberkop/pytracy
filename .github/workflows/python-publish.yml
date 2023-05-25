@@ -62,7 +62,7 @@ jobs:
         pip install build twine
 
     - name: Build wheels
-      uses: pypa/cibuildwheel
+      uses: pypa/cibuildwheel@latest
     # - name: Build manylinux Python wheels
     #   uses: RalfG/python-wheels-manylinux-build
     #   with:
