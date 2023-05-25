@@ -39,7 +39,7 @@ class CMakeBuildExt(build_ext):
 		check_call(['cmake', '.', '-DCMAKE_CXX_FLAGS=-fPIC'])
 
 		# Run make to build Tracy
-		check_call(['make'])
+		check_call(['cmake', '--build', '.'])
 
 		self.include_dirs.append(os.path.join(cwd, self.build_temp, 'tracy', 'public', 'tracy'))
 		# This build results in tracy/libTracyClient.a, add this to the library_dirs
