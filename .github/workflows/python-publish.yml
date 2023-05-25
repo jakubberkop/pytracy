@@ -62,7 +62,10 @@ jobs:
         pip install build twine
 
     - name: Build wheels
-      uses: pypa/cibuildwheel@latest
+      uses: pypa/cibuildwheel@v1.12.0
+      env:
+        CIBW_BEFORE_ALL: "yum install -y cmake && cmake --version"
+
     # - name: Build manylinux Python wheels
     #   uses: RalfG/python-wheels-manylinux-build
     #   with:
