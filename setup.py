@@ -58,15 +58,7 @@ class CustomInstall(install):
 		super().run()
 
 if os.name == 'nt':
-extra_link_args = []
-extra_link_args = []
-
-if os.name == 'nt':
-	pass
 	extra_link_args = []
-
-if os.name == 'nt':
-	pass
 else:
 	extra_link_args = ["-Wl,--no-undefined", "-ldl", "-lm"]
 
