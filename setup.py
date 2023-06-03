@@ -6,6 +6,9 @@ from setuptools.command.build_ext import build_ext
 from setuptools.command.install import install
 from subprocess import check_call
 
+reuse_build_folder = True
+debug = True
+
 class CMakeBuildExt(build_ext):
 	def run(self):
 		# Ensure that cmake is installed
@@ -19,27 +22,30 @@ class CMakeBuildExt(build_ext):
 		# current directory
 		cwd = os.getcwd()
 
-		# Do a clean build every time
-		if os.path.exists(self.build_temp):
-			shutil.rmtree(self.build_temp)
 
-		os.makedirs(self.build_temp)
+		if not reuse_build_folder:
+			# Do a clean build every time
+			if os.path.exists(self.build_temp):
+				shutil.rmtree(self.build_temp)
+
+			os.makedirs(self.build_temp)
 
 		# Change directory to the location where Tracy should be cloned
 		os.chdir(self.build_temp)
 
-		# Clone Tracy repository using Git
-		check_call(['git', 'clone', 'https://github.com/wolfpld/tracy'])
+		if not reuse_build_folder:
+			# Clone Tracy repository using Git
+			check_call(['git', 'clone', 'https://github.com/wolfpld/tracy'])
 
-		# Change directory to Tracy repository
-		os.chdir('tracy')
+			# Change directory to Tracy repository
+			os.chdir('tracy')
 
-		# Run cmake so that it generates shared libraries
-		# Compile with flags -fPIC -Wl and --no-undefined
-		check_call(['cmake', '.', '-DCMAKE_CXX_FLAGS=-fPIC', '-DCMAKE_BUILD_TYPE=Release'])
+			# Run cmake so that it generates shared libraries
+			# Compile with flags -fPIC -Wl and --no-undefined
+			check_call(['cmake', '.', '-DCMAKE_CXX_FLAGS=-fPIC', '-DCMAKE_BUILD_TYPE=Release'])
 
-		# Run make to build Tracy
-		check_call(['cmake', '--build', '.', '--config', 'Release'])
+			# Run make to build Tracy
+			check_call(['cmake', '--build', '.', '--config', 'Release'])
 
 		self.include_dirs.append(os.path.join(cwd, self.build_temp, 'tracy', 'public', 'tracy'))
 		
@@ -58,9 +64,18 @@ class CustomInstall(install):
 		super().run()
 
 if os.name == 'nt':
+	extra_compile_args = []
 	extra_link_args = []
 else:
-	extra_link_args = ["-Wl,--no-undefined", "-ldl", "-lm"]
+	extra_compile_args = []
+	extra_link_args = ["-Wno-undef", "-ldl", "-lm"]
+
+if debug:
+	extra_compile_args.extend(["-O0", "-g3"])
+	extra_link_args.extend(["-O0", "-g3"])
+
+	extra_compile_args.extend(["-fsanitize=address", "-fsanitize=undefined"])
+	extra_link_args.extend(["-fsanitize=address", "-fsanitize=undefined"])
 
 # Define the custom extension module
 extension = Extension(
@@ -68,7 +83,8 @@ extension = Extension(
 	['src/pyTracy.cpp'],
 	include_dirs=["tracy/public/tracy"],
 	libraries=['TracyClient'],
-	# Add -lm to link with math library
+
+	extra_compile_args=extra_compile_args,
 	extra_link_args=extra_link_args,
 )
 
