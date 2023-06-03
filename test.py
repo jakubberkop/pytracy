@@ -2,11 +2,14 @@ print("Before import")
 
 import pytracy
 
+pytracy.enableTracing()
+
 import time
 import numpy as np
 
 def a(i):
-	b(i)
+	for i in range(1000):
+		b(i)
 
 def b(i):
 	for j in range(i):
@@ -17,13 +20,13 @@ def c(i):
 
 i = 0
 
-while True:
+for i in range(100):
 	i += 1
 	# print(i)
 	a(10)
 
 	# Do numpy stuff
-	np.random.rand(100, 100)
+	# np.random.rand(100, 100)
 
 
 	# time.sleep(0.1)
