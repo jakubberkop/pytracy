@@ -197,7 +197,8 @@ static PyObject* enable_tracing(PyObject*, PyObject*)
 }
 
 static PyMethodDef moduleMethods[] = {
-	{"enableTracing", enable_tracing, METH_VARARGS, NULL}
+	{"enableTracing", enable_tracing, METH_VARARGS, NULL},
+	{NULL, NULL, 0, NULL}
 };
 
 static struct PyModuleDef pyTracyModule = {
