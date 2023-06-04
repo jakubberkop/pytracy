@@ -7,6 +7,8 @@
 #include <unordered_map>
 #include <deque>
 
+#include "robin_hood.h"
+
 struct ThreadData
 {
 	std::deque<TracyCZoneCtx> tracy_stack = {};
@@ -14,8 +16,8 @@ struct ThreadData
 };
 
 // TODO: Make this map thread safe
-static std::unordered_map<PyCodeObject*, uint64_t> source_location_map;
-static std::unordered_map<uint64_t, ThreadData*> thread_data_map;
+robin_hood::unordered_map<PyCodeObject*, uint64_t> source_location_map;
+robin_hood::unordered_map<uint64_t, ThreadData> thread_data_map;
 
 static ThreadData* get_current_thread_data()
 {
@@ -25,15 +27,51 @@ static ThreadData* get_current_thread_data()
 
 	if (it != thread_data_map.end())
 	{
-		return it->second;
+		return &it->second;
 	}
 
-	auto new_it = thread_data_map.insert({thread_id, new ThreadData()});
-	ThreadData* thread_data = new_it.first->second;
+	auto new_it = thread_data_map.emplace(thread_id, ThreadData{});
+	ThreadData* thread_data = &new_it.first->second;
 	
 	snprintf(thread_data->thread_name, 256, "Python Thread %lu", thread_id);
 
-	return thread_data_map[thread_id];
+	return thread_data;
+}
+
+static uint64_t get_source_index(PyFrameObject* frame)
+{
+	PyCodeObject* code = PyFrame_GetCode(frame);
+
+	uint64_t source_index;
+	const auto it = source_location_map.find(code);
+
+	if (it == source_location_map.end())
+	{
+		static char file_name[1024];
+		static char func_name[1024];
+
+		const char* temp_file_name = PyUnicode_AsUTF8(code->co_filename);
+		const char* temp_func_name = PyUnicode_AsUTF8(code->co_name);
+
+		strncpy(file_name, temp_file_name, 1024);
+		strncpy(func_name, temp_func_name, 1024);
+
+		uint64_t file_name_len = strlen(file_name);
+		uint64_t func_name_len = strlen(func_name);
+
+		unsigned int line = PyFrame_GetLineNumber(frame);
+
+		source_index = ___tracy_alloc_srcloc_name(line, file_name, file_name_len, func_name, func_name_len, func_name, func_name_len);
+		source_location_map.insert({code, source_index});
+	}
+	else
+	{
+		source_index = it->second;
+	}
+
+	Py_DECREF(code);
+
+	return source_index;
 }
 
 uint64_t get_frame_stack_size(PyFrameObject* frame)
@@ -117,38 +155,9 @@ int trace_function(PyObject* obj, PyFrameObject* frame, int what, PyObject *arg)
 		{
 			print_current_function_name(frame, what);
 
-			PyCodeObject* code = PyFrame_GetCode(frame);
-
-			uint64_t source_index;
-			const auto it = source_location_map.find(code);
-	
-			if (it == source_location_map.end())
-			{
-				static char file_name[1024];
-				static char func_name[1024];
-
-				const char* temp_file_name = PyUnicode_AsUTF8(code->co_filename);
-				const char* temp_func_name = PyUnicode_AsUTF8(code->co_name);
-
-				strncpy(file_name, temp_file_name, 1024);
-				strncpy(func_name, temp_func_name, 1024);
-
-				uint64_t file_name_len = strlen(file_name);
-				uint64_t func_name_len = strlen(func_name);
-
-				unsigned int line = PyFrame_GetLineNumber(frame);
-
-				source_index = ___tracy_alloc_srcloc_name(line, file_name, file_name_len, func_name, func_name_len, func_name, func_name_len);
-				source_location_map.insert({code, source_index});
-			}
-			else
-			{
-				source_index = it->second;
-			}
-
-			Py_DECREF(code);
-
+			uint64_t source_index = get_source_index(frame);
 			ThreadData* thread_data = get_current_thread_data();
+
 			thread_data->tracy_stack.push_back(___tracy_emit_zone_begin_alloc(source_index, 1));
 
 			break;
@@ -188,6 +197,7 @@ int trace_function(PyObject* obj, PyFrameObject* frame, int what, PyObject *arg)
 		case PyTrace_OPCODE:
 			break;
 	}
+
 	return 0;
 }
 
