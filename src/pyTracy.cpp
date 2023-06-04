@@ -124,12 +124,21 @@ int trace_function(PyObject* obj, PyFrameObject* frame, int what, PyObject *arg)
 	
 			if (it == source_location_map.end())
 			{
+				static char file_name[1024];
+				static char func_name[1024];
 
-				const char* fileName = PyUnicode_AsUTF8(code->co_filename);
-				const char* funcName = PyUnicode_AsUTF8(code->co_name);
-				const unsigned int line = PyFrame_GetLineNumber(frame);
+				const char* temp_file_name = PyUnicode_AsUTF8(code->co_filename);
+				const char* temp_func_name = PyUnicode_AsUTF8(code->co_name);
 
-				source_index = ___tracy_alloc_srcloc(line, fileName, strlen(fileName), funcName, strlen(funcName));
+				strncpy(file_name, temp_file_name, 1024);
+				strncpy(func_name, temp_func_name, 1024);
+
+				uint64_t file_name_len = strlen(file_name);
+				uint64_t func_name_len = strlen(func_name);
+
+				unsigned int line = PyFrame_GetLineNumber(frame);
+
+				source_index = ___tracy_alloc_srcloc_name(line, file_name, file_name_len, func_name, func_name_len, func_name, func_name_len);
 				source_location_map.insert({code, source_index});
 			}
 			else
