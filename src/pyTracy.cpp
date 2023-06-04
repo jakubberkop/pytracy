@@ -5,17 +5,16 @@
 #include <TracyC.h>
 
 #include <unordered_map>
-
-static struct ___tracy_source_location_data source_location_list [1000000] = {};
-static size_t source_location_index = 0;
+#include <deque>
 
 struct ThreadData
 {
-	TracyCZoneCtx tracy_stack [1000000] = {};
-	size_t tracy_stack_index = 0;
+	std::deque<TracyCZoneCtx> tracy_stack = {};
 	char thread_name[256] = {};
 };
 
+// TODO: Make this map thread safe
+static std::unordered_map<PyCodeObject*, uint64_t> source_location_map;
 static std::unordered_map<uint64_t, ThreadData*> thread_data_map;
 
 static ThreadData* get_current_thread_data()
@@ -47,7 +46,9 @@ uint64_t get_frame_stack_size(PyFrameObject* frame)
 	}
 
 	uint64_t size = get_frame_stack_size(back) + 1;
+
 	Py_DECREF(back);
+
 	return size;
 }
 
@@ -101,7 +102,7 @@ void print_current_function_name(PyFrameObject* frame, int what)
 	ThreadData* thread_data = get_current_thread_data();
 	unsigned int thread_id = PyThread_get_thread_ident();
 
-	printf("T: %d PY %ld: Tracy %ld ", thread_id, get_frame_stack_size(frame), thread_data->tracy_stack_index);
+	printf("T: %d PY %ld: Tracy %ld ", thread_id, get_frame_stack_size(frame), thread_data->tracy_stack.size());
 	printf("%s %s %d", fileName, funcname, line);
 	printf("\n");
 
@@ -117,38 +118,29 @@ int trace_function(PyObject* obj, PyFrameObject* frame, int what, PyObject *arg)
 			print_current_function_name(frame, what);
 
 			PyCodeObject* code = PyFrame_GetCode(frame);
-			const char* fileName = PyUnicode_AsUTF8(code->co_filename);
-			const char* funcname = PyUnicode_AsUTF8(code->co_name);
-			const unsigned int line = PyFrame_GetLineNumber(frame);
 
-			struct ___tracy_source_location_data* source_location = NULL;
-
-			for (size_t i = 0; i < source_location_index; i++)
+			uint64_t source_index;
+			const auto it = source_location_map.find(code);
+	
+			if (it == source_location_map.end())
 			{
-				if (source_location_list[i].line == line && strcmp(source_location_list[i].file, fileName) == 0)
-				{
-					source_location = &source_location_list[i];
-					break;
-				}
-			}
 
-			if (source_location == NULL)
+				const char* fileName = PyUnicode_AsUTF8(code->co_filename);
+				const char* funcName = PyUnicode_AsUTF8(code->co_name);
+				const unsigned int line = PyFrame_GetLineNumber(frame);
+
+				source_index = ___tracy_alloc_srcloc(line, fileName, strlen(fileName), funcName, strlen(funcName));
+				source_location_map.insert({code, source_index});
+			}
+			else
 			{
-				source_location = &source_location_list[source_location_index]; 
-				source_location_index++;
+				source_index = it->second;
 			}
-			source_location->name = funcname;
-			source_location->function = funcname;
-			source_location->file = fileName;
-			source_location->line = line;
-			source_location->color = 0;
-
-			ThreadData* thread_data = get_current_thread_data();
-
-			thread_data->tracy_stack[thread_data->tracy_stack_index] = ___tracy_emit_zone_begin(source_location, 1);
-			thread_data->tracy_stack_index++;
 
 			Py_DECREF(code);
+
+			ThreadData* thread_data = get_current_thread_data();
+			thread_data->tracy_stack.push_back(___tracy_emit_zone_begin_alloc(source_index, 1));
 
 			break;
 		}
@@ -163,15 +155,15 @@ int trace_function(PyObject* obj, PyFrameObject* frame, int what, PyObject *arg)
 
 			ThreadData* thread_data = get_current_thread_data();
 
-			if (thread_data->tracy_stack_index == 0)
+			if (thread_data->tracy_stack.size() == 0)
 			{
 				printf("ERROR: tracy_stack_index == 0\n");
 				break;
 			}
 
-
-			thread_data->tracy_stack_index--;
-			___tracy_emit_zone_end(thread_data->tracy_stack[thread_data->tracy_stack_index]);
+			const auto ctx = thread_data->tracy_stack.back();
+			thread_data->tracy_stack.pop_back();
+			___tracy_emit_zone_end(ctx);
 
 			break;
 		}
