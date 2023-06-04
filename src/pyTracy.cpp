@@ -193,6 +193,7 @@ int trace_function(PyObject* obj, PyFrameObject* frame, int what, PyObject *arg)
 static PyObject* enable_tracing(PyObject*, PyObject*)
 {
 	PyEval_SetTrace(trace_function, NULL);
+	Py_INCREF(Py_None);
 	return Py_None;
 }
 
