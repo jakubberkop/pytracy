@@ -73,20 +73,11 @@ static uint64_t get_source_index(PyFrameObject* frame)
 
 	if (it == source_location_map.end())
 	{
-		static char file_name[1024];
-		static char func_name[1024];
+		Py_ssize_t file_name_len;
+		Py_ssize_t func_name_len;
 
-		PyObject* py_bytes_file_name = PyUnicode_AsASCIIString(code->co_filename);
-		char* bytes_file_name = PyBytes_AsString(py_bytes_file_name);
-
-		PyObject* py_bytes_func_name = PyUnicode_AsASCIIString(code->co_name);
-		char* bytes_func_name = PyBytes_AsString(py_bytes_func_name);
-
-		uint64_t file_name_len = strlen(bytes_file_name);
-		uint64_t func_name_len = strlen(bytes_func_name);
-
-		strcpy(file_name, bytes_file_name);
-		strcpy(func_name, bytes_func_name);
+		const char* file_name = PyUnicode_AsUTF8AndSize(code->co_filename, &file_name_len);
+		const char* func_name = PyUnicode_AsUTF8AndSize(code->co_name, &func_name_len);
 
 		source_index = ___tracy_alloc_srcloc_name(line, file_name, file_name_len + 1, func_name, func_name_len + 1, func_name, func_name_len + 1);
 		source_location_map.insert({key, source_index});
