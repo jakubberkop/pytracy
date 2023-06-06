@@ -193,7 +193,8 @@ int trace_function(PyObject* obj, PyFrameObject* frame, int what, PyObject *arg)
 
 			if (thread_data->tracy_stack.size() == 0)
 			{
-				printf("ERROR: tracy_stack_index == 0\n");
+				printf("pytracy internal error: tracy_stack_index == 0\n");
+				assert(false);
 				break;
 			}
 
