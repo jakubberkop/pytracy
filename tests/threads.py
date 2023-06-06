@@ -16,15 +16,15 @@ def worker(num):
     pytracy.enableTracing()
     print(f'Worker: {num}')
 
-    for i in range(1000):
-        print(i)
+    for i in range(10_000):
+        # print(i)
         test_function()
         i += 1
     return
 
 threads = []
 
-for i in range(1):
+for i in range(10):
     t = threading.Thread(target=worker, args=(i,))
     threads.append(t)
 
