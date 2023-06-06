@@ -15,8 +15,31 @@ struct ThreadData
 	char thread_name[256] = {};
 };
 
+struct SourceLocationKey
+{
+	PyCodeObject* code;
+	int64_t line;
+};
+
+bool operator==(const SourceLocationKey& lhs, const SourceLocationKey& rhs)
+{
+	return lhs.code == rhs.code && lhs.line == rhs.line;
+}
+
+namespace robin_hood
+{
+	template<>
+	struct hash<SourceLocationKey>
+	{
+		size_t operator()(const SourceLocationKey& key) const
+		{
+			return hash<PyCodeObject*>()(key.code) ^ hash<uint64_t>()(key.line);
+		}
+	};
+}
+
 // TODO: Make this map thread safe
-robin_hood::unordered_map<PyCodeObject*, uint64_t> source_location_map;
+robin_hood::unordered_map<SourceLocationKey, uint64_t> source_location_map;
 robin_hood::unordered_map<uint64_t, ThreadData> thread_data_map;
 
 static ThreadData* get_current_thread_data()
@@ -41,28 +64,32 @@ static ThreadData* get_current_thread_data()
 static uint64_t get_source_index(PyFrameObject* frame)
 {
 	PyCodeObject* code = PyFrame_GetCode(frame);
+	int64_t line = PyFrame_GetLineNumber(frame);
 
 	uint64_t source_index;
-	const auto it = source_location_map.find(code);
+
+	SourceLocationKey key = {code, line};
+	const auto it = source_location_map.find(key);
 
 	if (it == source_location_map.end())
 	{
 		static char file_name[1024];
 		static char func_name[1024];
 
-		const char* temp_file_name = PyUnicode_AsUTF8(code->co_filename);
-		const char* temp_func_name = PyUnicode_AsUTF8(code->co_name);
+		PyObject* py_bytes_file_name = PyUnicode_AsASCIIString(code->co_filename);
+		char* bytes_file_name = PyBytes_AsString(py_bytes_file_name);
 
-		strncpy(file_name, temp_file_name, 1024);
-		strncpy(func_name, temp_func_name, 1024);
+		PyObject* py_bytes_func_name = PyUnicode_AsASCIIString(code->co_name);
+		char* bytes_func_name = PyBytes_AsString(py_bytes_func_name);
 
-		uint64_t file_name_len = strlen(file_name);
-		uint64_t func_name_len = strlen(func_name);
+		uint64_t file_name_len = strlen(bytes_file_name);
+		uint64_t func_name_len = strlen(bytes_func_name);
 
-		unsigned int line = PyFrame_GetLineNumber(frame);
+		strcpy(file_name, bytes_file_name);
+		strcpy(func_name, bytes_func_name);
 
-		source_index = ___tracy_alloc_srcloc_name(line, file_name, file_name_len, func_name, func_name_len, func_name, func_name_len);
-		source_location_map.insert({code, source_index});
+		source_index = ___tracy_alloc_srcloc_name(line, file_name, file_name_len + 1, func_name, func_name_len + 1, func_name, func_name_len + 1);
+		source_location_map.insert({key, source_index});
 	}
 	else
 	{
@@ -201,9 +228,40 @@ int trace_function(PyObject* obj, PyFrameObject* frame, int what, PyObject *arg)
 	return 0;
 }
 
+static bool is_tracing_enabled = false;
+
+void initialize_call_stack(PyFrameObject* frame)
+{
+	PyFrameObject* back = PyFrame_GetBack(frame);
+
+	if (back)
+	{
+		initialize_call_stack(back);
+		Py_DECREF(back);
+	}
+
+	uint64_t source_index = get_source_index(frame);
+	ThreadData* thread_data = get_current_thread_data();
+
+	TracyCZoneCtx ctx = ___tracy_emit_zone_begin_alloc(source_index, 1);
+	thread_data->tracy_stack.push_back(ctx);
+}
+
 static PyObject* enable_tracing(PyObject*, PyObject*)
 {
+	if (is_tracing_enabled)
+	{
+		Py_INCREF(Py_None);
+		return Py_None;
+	}
+
+	PyThreadState* ts = PyThreadState_Get();
+	PyFrameObject* frame = PyThreadState_GetFrame(ts);
+
+	initialize_call_stack(frame);
+
 	PyEval_SetTrace(trace_function, NULL);
+
 	Py_INCREF(Py_None);
 	return Py_None;
 }
