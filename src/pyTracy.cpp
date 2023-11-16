@@ -79,6 +79,22 @@ static uint64_t get_source_index(PyFrameObject* frame)
 		const char* file_name = PyUnicode_AsUTF8AndSize(code->co_filename, &file_name_len);
 		const char* func_name = PyUnicode_AsUTF8AndSize(code->co_name, &func_name_len);
 
+		size_t file_name_len_real = strlen(file_name);
+		size_t func_name_len_real = strlen(func_name);
+
+		if (file_name_len != file_name_len_real)
+		{
+			printf("file name length mismatch %ld %lu\n", file_name_len, file_name_len_real);
+		}
+
+		if (func_name_len != func_name_len_real)
+		{
+			printf("func name length mismatch %ld %lu\n", func_name_len, func_name_len_real);
+		}
+
+
+		// printf("lengths %ld %lu %ld %lu\n", file_name_len, file_name_len_real, func_name_len, func_name_len_real);
+
 		source_index = ___tracy_alloc_srcloc_name(line, file_name, file_name_len + 1, func_name, func_name_len + 1, func_name, func_name_len + 1);
 		source_location_map.insert({key, source_index});
 	}
