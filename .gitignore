@@ -165,5 +165,7 @@ installVenv
 .vs/
 x64/
 
-*vcxprojec.filters
-*.user
+*.vcxproj.filters
+*.vcxproj.user
+
+*.pdb
