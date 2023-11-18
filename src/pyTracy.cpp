@@ -42,9 +42,23 @@ namespace robin_hood
 robin_hood::unordered_map<SourceLocationKey, uint64_t> source_location_map;
 robin_hood::unordered_map<uint64_t, ThreadData> thread_data_map;
 
+#define WIN32_LEAN_AND_MEAN
+
+#include "Windows.h"
+
+size_t get_native_thread_id()
+{
+	#if defined(_WIN32)
+		return GetCurrentThreadId();
+	#else
+		assert(false);
+	#endif
+}
+
+
 static ThreadData* get_current_thread_data()
 {
-	unsigned long thread_id = PyThread_get_thread_ident();
+	unsigned long thread_id = get_native_thread_id();
 
 	auto it = thread_data_map.find(thread_id);
 
@@ -53,9 +67,16 @@ static ThreadData* get_current_thread_data()
 		return &it->second;
 	}
 
+	if (thread_data_map.size() > 0)
+	{
+		printf("pytracy internal error: thread_data_map.size() > 0\n");
+		printf("pytracy internal error: multiple threads are not supported\n");
+		assert(false);
+	}
+
 	auto new_it = thread_data_map.emplace(thread_id, ThreadData{});
 	ThreadData* thread_data = &new_it.first->second;
-	
+
 	snprintf(thread_data->thread_name, 256, "Python Thread %lu", thread_id);
 
 	return thread_data;
@@ -71,7 +92,8 @@ static uint64_t get_source_index(PyFrameObject* frame)
 	SourceLocationKey key = {code, line};
 	const auto it = source_location_map.find(key);
 
-	if (it == source_location_map.end())
+	// Without fucking lookup it works just fine
+	// if (it == source_location_map.end())
 	{
 		Py_ssize_t file_name_len;
 		Py_ssize_t func_name_len;
@@ -79,27 +101,45 @@ static uint64_t get_source_index(PyFrameObject* frame)
 		const char* file_name = PyUnicode_AsUTF8AndSize(code->co_filename, &file_name_len);
 		const char* func_name = PyUnicode_AsUTF8AndSize(code->co_name, &func_name_len);
 
-		size_t file_name_len_real = strlen(file_name);
-		size_t func_name_len_real = strlen(func_name);
+		Py_INCREF(code->co_filename);
+		Py_INCREF(code->co_name);
+
+		assert(file_name != 0);
+		assert(func_name != 0);
+
+		/*char* a = (char*)malloc(func_name_len_real + 1);
+		assert(a);
+		func_name = strcpy(a, func_name);
+
+		assert(strlen(func_name) == func_name_len);*/
+		
+		// CARDIGAN ORIENTED PROGRAMMING <3
+//		char* a = (char*)malloc(file_name_len_real + 1);
+//		strcpy(a, func_name);
+//		func_name = a;
 
 		size_t buffer_size = file_name_len + 20;
 		char* file_name_with_line_number = (char*)malloc(buffer_size);
 
-		int total_formatted_size = snprintf(file_name_with_line_number, buffer_size, "%s:%d", file_name, line);
+		int total_formatted_size = snprintf(file_name_with_line_number, buffer_size, "%s:%zu", file_name, line);
 		
+		assert(total_formatted_size == strlen(file_name_with_line_number));
+
 		// Formatting was successful
 		assert(total_formatted_size > 0);
 
 		// Formatted string fits into the buffer
 		assert(total_formatted_size < buffer_size);
 
+		// printf("CARDIGAN = {%s} {%s}\n", file_name_with_line_number, func_name);
+
 		source_index = ___tracy_alloc_srcloc_name(line, file_name_with_line_number, total_formatted_size, func_name, func_name_len, func_name, func_name_len);
 		source_location_map.insert({key, source_index});
 	}
-	else
-	{
-		source_index = it->second;
-	}
+	// else
+	// {
+	// 	source_index = it->second;
+	// }
 
 	Py_DECREF(code);
 
@@ -117,7 +157,7 @@ uint64_t get_frame_stack_size(PyFrameObject* frame)
 
 	uint64_t size = get_frame_stack_size(back) + 1;
 
-	Py_DECREF(back);
+	// Py_DECREF(back);
 
 	return size;
 }
@@ -190,8 +230,9 @@ int trace_function(PyObject* obj, PyFrameObject* frame, int what, PyObject *arg)
 			uint64_t source_index = get_source_index(frame);
 			ThreadData* thread_data = get_current_thread_data();
 
+			/*
+			*/
 			thread_data->tracy_stack.push_back(___tracy_emit_zone_begin_alloc(source_index, 1));
-
 			break;
 		}
 		case PyTrace_EXCEPTION:
@@ -201,6 +242,8 @@ int trace_function(PyObject* obj, PyFrameObject* frame, int what, PyObject *arg)
 			break;
 		case PyTrace_RETURN:
 		{
+/*			
+			*/
 			print_current_function_name(frame, what);
 
 			ThreadData* thread_data = get_current_thread_data();
@@ -215,7 +258,6 @@ int trace_function(PyObject* obj, PyFrameObject* frame, int what, PyObject *arg)
 			const auto ctx = thread_data->tracy_stack.back();
 			thread_data->tracy_stack.pop_back();
 			___tracy_emit_zone_end(ctx);
-
 			break;
 		}
 		case PyTrace_C_CALL:
@@ -243,7 +285,7 @@ void initialize_call_stack(PyFrameObject* frame)
 	if (back)
 	{
 		initialize_call_stack(back);
-		Py_DECREF(back);
+		// Py_DECREF(back);
 	}
 
 	uint64_t source_index = get_source_index(frame);
