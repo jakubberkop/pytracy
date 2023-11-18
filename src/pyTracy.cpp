@@ -82,20 +82,18 @@ static uint64_t get_source_index(PyFrameObject* frame)
 		size_t file_name_len_real = strlen(file_name);
 		size_t func_name_len_real = strlen(func_name);
 
-		if (file_name_len != file_name_len_real)
-		{
-			printf("file name length mismatch %ld %lu\n", file_name_len, file_name_len_real);
-		}
+		size_t buffer_size = file_name_len + 20;
+		char* file_name_with_line_number = (char*)malloc(buffer_size);
 
-		if (func_name_len != func_name_len_real)
-		{
-			printf("func name length mismatch %ld %lu\n", func_name_len, func_name_len_real);
-		}
+		int total_formatted_size = snprintf(file_name_with_line_number, buffer_size, "%s:%d", file_name, line);
+		
+		// Formatting was successful
+		assert(total_formatted_size > 0);
 
+		// Formatted string fits into the buffer
+		assert(total_formatted_size < buffer_size);
 
-		// printf("lengths %ld %lu %ld %lu\n", file_name_len, file_name_len_real, func_name_len, func_name_len_real);
-
-		source_index = ___tracy_alloc_srcloc_name(line, file_name, file_name_len + 1, func_name, func_name_len + 1, func_name, func_name_len + 1);
+		source_index = ___tracy_alloc_srcloc_name(line, file_name_with_line_number, total_formatted_size, func_name, func_name_len, func_name, func_name_len);
 		source_location_map.insert({key, source_index});
 	}
 	else
