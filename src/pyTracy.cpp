@@ -1,8 +1,3 @@
-// #include <Python.h>
-// #include <frameobject.h>
-
-#define PYBIND11_DETAILED_ERROR_MESSAGES 1
-
 #include <pybind11/pybind11.h>
 
 namespace py = pybind11;
@@ -11,8 +6,6 @@ namespace py = pybind11;
 #include <TracyC.h>
 
 #include <mutex>
-
-#include <unordered_map>
 #include <deque>
 
 #include "robin_hood.h"
@@ -44,8 +37,6 @@ static ThreadData* get_current_thread_data()
 static uint64_t get_source_index_from_frame(PyFrameObject* frame)
 {
 	PyCodeObject* code = PyFrame_GetCode(frame);
-	int64_t line = PyFrame_GetLineNumber(frame);
-
 	assert(code != 0);
 
 	Py_ssize_t file_name_len;
@@ -53,6 +44,7 @@ static uint64_t get_source_index_from_frame(PyFrameObject* frame)
 
 	const char* file_name = PyUnicode_AsUTF8AndSize(code->co_filename, &file_name_len);
 	const char* func_name = PyUnicode_AsUTF8AndSize(code->co_name, &func_name_len);
+	int64_t line = code->co_firstlineno;
 
 	assert(file_name != 0);
 	assert(func_name != 0);
@@ -64,87 +56,12 @@ static uint64_t get_source_index_from_frame(PyFrameObject* frame)
 	return source_index;
 }
 
-uint64_t get_frame_stack_size(PyFrameObject* frame)
-{
-	PyFrameObject * back = PyFrame_GetBack(frame);
-
-	if (back == NULL)
-	{
-		return 0;
-	}
-
-	uint64_t size = get_frame_stack_size(back) + 1;
-
-	Py_DECREF(back);
-
-	return size;
-}
-
-void print_current_function_name(PyFrameObject* frame, int what)
-{
-	return;
-	PyCodeObject* code = PyFrame_GetCode(frame);
-	const char* fileName = PyUnicode_AsUTF8(code->co_filename);
-
-	const char* funcname = PyUnicode_AsUTF8(code->co_name);
-	const int line = PyFrame_GetLineNumber(frame);
-
-	const char* message = nullptr;
-
-	switch (what)
-	{
-	case PyTrace_CALL:
-		message = "Call     ";
-	 	break;
-	case PyTrace_EXCEPTION:
-		message = "Exception";
-		break;
-	case PyTrace_RETURN:
-		message = "Return   ";
-	 	break;
-	case PyTrace_C_CALL:
-		message = "C_Call   ";
-		break;
-	case PyTrace_C_EXCEPTION:
-		message = "C_Exc    ";
-		break;
-	case PyTrace_C_RETURN:
-		message = "C_Ret    ";
-		break;
-	default:
-		message = "Unknown  ";
-		break;
-	}
-
-	// print indent
-	// for (int i = 0; i < tracy_stack_index; i++)
-	// {
-	// 	printf("  ");
-	// }
-
-	if (message != nullptr)
-	{
-		printf("%s", message);
-	}
-
-	ThreadData* thread_data = get_current_thread_data();
-	unsigned int thread_id = PyThread_get_thread_ident();
-
-	// printf("T: %d PY %ld: Tracy %ld ", thread_id, get_frame_stack_size(frame), thread_data->tracy_stack.size());
-	// printf("%s %s %d", fileName, funcname, line);
-	// printf("\n");
-
-	Py_DECREF(code);
-}
-
 int on_trace_event(PyObject* obj, PyFrameObject* frame, int what, PyObject *arg)
 {
 	switch (what)
 	{
 		case PyTrace_CALL:
 		{
-			print_current_function_name(frame, what);
-
 			uint64_t source_index = get_source_index_from_frame(frame);
 			ThreadData* thread_data = get_current_thread_data();
 
@@ -153,13 +70,11 @@ int on_trace_event(PyObject* obj, PyFrameObject* frame, int what, PyObject *arg)
 			break;
 		}
 		case PyTrace_EXCEPTION:
-			print_current_function_name(frame, what);
 			break;
 		case PyTrace_LINE:
 			break;
 		case PyTrace_RETURN:
 		{
-			print_current_function_name(frame, what);
 
 			ThreadData* thread_data = get_current_thread_data();
 
@@ -176,13 +91,10 @@ int on_trace_event(PyObject* obj, PyFrameObject* frame, int what, PyObject *arg)
 			break;
 		}
 		case PyTrace_C_CALL:
-			print_current_function_name(frame, what);
 			break;
 		case PyTrace_C_EXCEPTION:
-			print_current_function_name(frame, what);
 			break;
 		case PyTrace_C_RETURN:
-			print_current_function_name(frame, what);
 			break;
 		case PyTrace_OPCODE:
 			break;
@@ -254,8 +166,6 @@ static py::none set_tracing_mode(int _mode)
 		PyEval_SetTrace(on_trace_event, NULL);
 	}
 
-	printf("set_tracing_mode %d done\n", _mode);
-
 	return {};
 }
 
@@ -265,11 +175,17 @@ class TracingFunctionWrapper
 public:
 
 	TracingFunctionWrapper(py::function func)
-		: func(func) {}
+		: func(func)
+		{
+			py::object code_object = func.attr("__code__");
+			func_name = code_object.attr("co_name").cast<std::string>();
+			file_name = code_object.attr("co_filename").cast<std::string>();
+			line = code_object.attr("co_firstlineno").cast<int64_t>();
+		}
 
 	void mark_function_enter() const
 	{
-		if (tracing_mode == TracingMode::MarkedFunctions)
+		if (tracing_mode != TracingMode::MarkedFunctions)
 		{
 			return;
 		}
@@ -282,16 +198,7 @@ public:
 			return;
 		}
 
-		PyThreadState* ts = PyThreadState_Get();
-		PyFrameObject* frame = PyThreadState_GetFrame(ts);
-		
-		int64_t line = PyFrame_GetLineNumber(frame);
-
-		std::string func_name = func.attr("__code__").attr("co_name").cast<std::string>();
-		std::string file_name = func.attr("__code__").attr("co_filename").cast<std::string>();
-
 		uint64_t source_index = ___tracy_alloc_srcloc(line, file_name.c_str(), file_name.size(), func_name.c_str(), func_name.size());
-
 		ThreadData* thread_data = get_current_thread_data();
 
 		TracyCZoneCtx ctx = ___tracy_emit_zone_begin_alloc(source_index, 1);
@@ -300,7 +207,7 @@ public:
 
 	void mark_function_exit() const
 	{
-		if (tracing_mode == TracingMode::MarkedFunctions)
+		if (tracing_mode != TracingMode::MarkedFunctions)
 		{
 			return;
 		}
@@ -340,17 +247,22 @@ public:
 
 private:
 	py::function func;
+	std::string func_name;
+	std::string file_name;
+	int64_t line;
 };
-
 
 PYBIND11_MODULE(pytracy, m) {
 	m.doc() = "Tracy Profiler bindings for Python";
-
-	// m.def("enable_tracing", &enable_tracing, "Enables Tracy Profiler tracing");
-	// m.def("disable_tracing", &disable_tracing, "Disables Tracy Profiler tracing");
 	m.def("set_tracing_mode", &set_tracing_mode, "Sets Tracy Profiler tracing mode");
 
-	py::class_<TracingFunctionWrapper>(m, "trace_function")
+	py::class_<TracingFunctionWrapper>(m, "mark_function")
 		.def(py::init<py::function>())
 		.def("__call__", &TracingFunctionWrapper::call);
+
+	py::enum_<TracingMode>(m, "TracingMode")
+		.value("Disabled", TracingMode::Disabled)
+		.value("MarkedFunctions", TracingMode::MarkedFunctions)
+		.value("All", TracingMode::All)
+		.export_values();
 };
