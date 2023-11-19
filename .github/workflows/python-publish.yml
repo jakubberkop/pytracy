@@ -33,37 +33,42 @@ jobs:
       with:
         python-version: ${{ matrix.python-version }}
 
+    - name: CHECK MATE
+      run: python -c "import glob; print(glob.glob('**/*.lib', recursive=True))"
+
     - name: Install dependencies
-      run: pip install build twine cibuildwheel==2.16.2
+      run: pip install build
 
     - name: Build wheels
-      run: python -m cibuildwheel --output-dir wheelhouse
+      run: pip wheel . --no-deps --wheel-dir dist
 
     - uses: actions/upload-artifact@v3
       with:
-        path: ./wheelhouse/*.whl
+        name: artifact
+        path: dist
 
-  build_wheels_linux:
-    runs-on: ubuntu-20.04
+  # build_wheels_linux:
+  #   runs-on: ubuntu-20.04
 
-    steps:
-    - uses: actions/checkout@v4
+  #   steps:
+  #   - uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v3
+  #   - name: Set up Python
+  #     uses: actions/setup-python@v3
 
-    - name: Install dependencies
-      run: pip install build twine cibuildwheel==2.16.2
+  #   - name: Install dependencies
+  #     run: pip install build twine cibuildwheel==2.16.2
 
-    - name: Build wheels
-      run: python -m cibuildwheel --output-dir wheelhouse
+  #   - name: Build wheels
+  #     run: python -m cibuildwheel --output-dir wheelhouse
 
-    - uses: actions/upload-artifact@v3
-      with:
-        path: ./wheelhouse/*.whl
+  #   - uses: actions/upload-artifact@v3
+  #     with:
+  #       path: ./wheelhouse/*.whl
 
   upload_all:
-    needs: [build_wheels_windows, build_wheels_linux]
+    needs: [build_wheels_windows]
+    # needs: [build_wheels_windows, build_wheels_linux]
     permissions:
       id-token: write
     runs-on: ubuntu-latest
