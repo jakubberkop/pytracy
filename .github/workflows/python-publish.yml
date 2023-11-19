@@ -25,7 +25,7 @@ jobs:
       matrix:
         python-version: ["3.11"]
         # os: [ubuntu-20.04, windows-2019, macOS-11]
-        os: [ubuntu-20.04]
+        os: [ubuntu-20.04, windows-2019]
 
     steps:
     - uses: actions/checkout@v4
@@ -55,6 +55,12 @@ jobs:
       with:
         name: artifact
         path: dist
+
+    - name: Set up Python
+      uses: actions/setup-python@v3
+
+    - name: Install dependencies
+      run: pip install twine
 
     - name: Publish wheels to PyPI
       env:
