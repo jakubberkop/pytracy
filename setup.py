@@ -71,10 +71,10 @@ class CustomInstall(install):
 		super().run()
 
 if os.name == 'nt':
-	extra_compile_args = []
+	extra_compile_args = ["/std:c++17"]
 	extra_link_args = []
 else:
-	extra_compile_args = []
+	extra_compile_args = ["-std=c++17"]
 	extra_link_args = ["-Wno-undef", "-ldl", "-lm"]
 
 if debug:
