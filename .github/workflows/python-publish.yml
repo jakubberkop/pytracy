@@ -28,15 +28,8 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v3
-
-    - name: Install dependencies
-      run: |
-        pip install build twine cibuildwheel==2.16.2
-
     - name: Build wheels
-      run: python -m cibuildwheel --output-dir wheelhouse
+      uses: pypa/cibuildwheel@v2.16.2
 
     - uses: actions/upload-artifact@v3
       with:
