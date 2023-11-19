@@ -49,9 +49,6 @@ jobs:
 
   build_wheels_linux:
     runs-on: ubuntu-20.04
-    strategy:
-      matrix:
-        python-version: ["39", "310", "311", "312"]
 
     steps:
     - uses: actions/checkout@v4
@@ -64,8 +61,6 @@ jobs:
 
     - name: Build wheels
       run: python -m cibuildwheel --output-dir wheelhouse
-      env:
-        CIBW_BUILD: cp${{ matrix.python-version }}-*
 
     - uses: actions/upload-artifact@v3
       with:
