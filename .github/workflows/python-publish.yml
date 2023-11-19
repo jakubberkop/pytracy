@@ -33,9 +33,6 @@ jobs:
       with:
         python-version: ${{ matrix.python-version }}
 
-    - name: CHECK MATE
-      run: python -c "import glob; print(glob.glob('**/*.lib', recursive=True))"
-
     - name: Install dependencies
       run: pip install build
 
