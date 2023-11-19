@@ -4,6 +4,8 @@
 #define TRACY_ENABLE
 #include <TracyC.h>
 
+#include <mutex>
+
 #include <unordered_map>
 #include <deque>
 
@@ -12,74 +14,25 @@
 struct ThreadData
 {
 	std::deque<TracyCZoneCtx> tracy_stack = {};
-	char thread_name[256] = {};
 };
 
-struct SourceLocationKey
-{
-	PyCodeObject* code;
-	int64_t line;
-};
-
-bool operator==(const SourceLocationKey& lhs, const SourceLocationKey& rhs)
-{
-	return lhs.code == rhs.code && lhs.line == rhs.line;
-}
-
-namespace robin_hood
-{
-	template<>
-	struct hash<SourceLocationKey>
-	{
-		size_t operator()(const SourceLocationKey& key) const
-		{
-			return hash<PyCodeObject*>()(key.code) ^ hash<uint64_t>()(key.line);
-		}
-	};
-}
-
-// TODO: Make this map thread safe
-robin_hood::unordered_map<SourceLocationKey, uint64_t> source_location_map;
-robin_hood::unordered_map<uint64_t, ThreadData> thread_data_map;
-
-#define WIN32_LEAN_AND_MEAN
-
-#include "Windows.h"
-
-size_t get_native_thread_id()
-{
-	#if defined(_WIN32)
-		return GetCurrentThreadId();
-	#else
-		assert(false);
-	#endif
-}
-
+robin_hood::unordered_map<uint64_t, ThreadData*> thread_data_map;
+std::mutex thread_data_mutex;
 
 static ThreadData* get_current_thread_data()
 {
-	unsigned long thread_id = get_native_thread_id();
+	uint64_t thread_id = PyThread_get_thread_ident();
+
+	std::lock_guard <std::mutex> lock(thread_data_mutex);
 
 	auto it = thread_data_map.find(thread_id);
-
 	if (it != thread_data_map.end())
 	{
-		return &it->second;
+		return it->second;
 	}
 
-	if (thread_data_map.size() > 0)
-	{
-		printf("pytracy internal error: thread_data_map.size() > 0\n");
-		printf("pytracy internal error: multiple threads are not supported\n");
-		assert(false);
-	}
-
-	auto new_it = thread_data_map.emplace(thread_id, ThreadData{});
-	ThreadData* thread_data = &new_it.first->second;
-
-	snprintf(thread_data->thread_name, 256, "Python Thread %lu", thread_id);
-
-	return thread_data;
+	auto new_it = thread_data_map.emplace(thread_id, new ThreadData{});
+	return new_it.first->second;
 }
 
 static uint64_t get_source_index(PyFrameObject* frame)
@@ -87,59 +40,18 @@ static uint64_t get_source_index(PyFrameObject* frame)
 	PyCodeObject* code = PyFrame_GetCode(frame);
 	int64_t line = PyFrame_GetLineNumber(frame);
 
-	uint64_t source_index;
+	assert(code != 0);
 
-	SourceLocationKey key = {code, line};
-	const auto it = source_location_map.find(key);
+	Py_ssize_t file_name_len;
+	Py_ssize_t func_name_len;
 
-	// Without fucking lookup it works just fine
-	// if (it == source_location_map.end())
-	{
-		Py_ssize_t file_name_len;
-		Py_ssize_t func_name_len;
+	const char* file_name = PyUnicode_AsUTF8AndSize(code->co_filename, &file_name_len);
+	const char* func_name = PyUnicode_AsUTF8AndSize(code->co_name, &func_name_len);
 
-		const char* file_name = PyUnicode_AsUTF8AndSize(code->co_filename, &file_name_len);
-		const char* func_name = PyUnicode_AsUTF8AndSize(code->co_name, &func_name_len);
+	assert(file_name != 0);
+	assert(func_name != 0);
 
-		Py_INCREF(code->co_filename);
-		Py_INCREF(code->co_name);
-
-		assert(file_name != 0);
-		assert(func_name != 0);
-
-		/*char* a = (char*)malloc(func_name_len_real + 1);
-		assert(a);
-		func_name = strcpy(a, func_name);
-
-		assert(strlen(func_name) == func_name_len);*/
-		
-		// CARDIGAN ORIENTED PROGRAMMING <3
-//		char* a = (char*)malloc(file_name_len_real + 1);
-//		strcpy(a, func_name);
-//		func_name = a;
-
-		size_t buffer_size = file_name_len + 20;
-		char* file_name_with_line_number = (char*)malloc(buffer_size);
-
-		int total_formatted_size = snprintf(file_name_with_line_number, buffer_size, "%s:%zu", file_name, line);
-		
-		assert(total_formatted_size == strlen(file_name_with_line_number));
-
-		// Formatting was successful
-		assert(total_formatted_size > 0);
-
-		// Formatted string fits into the buffer
-		assert(total_formatted_size < buffer_size);
-
-		// printf("CARDIGAN = {%s} {%s}\n", file_name_with_line_number, func_name);
-
-		source_index = ___tracy_alloc_srcloc_name(line, file_name_with_line_number, total_formatted_size, func_name, func_name_len, func_name, func_name_len);
-		source_location_map.insert({key, source_index});
-	}
-	// else
-	// {
-	// 	source_index = it->second;
-	// }
+	uint64_t source_index = ___tracy_alloc_srcloc(line, file_name, file_name_len, func_name, func_name_len);
 
 	Py_DECREF(code);
 
@@ -157,7 +69,7 @@ uint64_t get_frame_stack_size(PyFrameObject* frame)
 
 	uint64_t size = get_frame_stack_size(back) + 1;
 
-	// Py_DECREF(back);
+	Py_DECREF(back);
 
 	return size;
 }
@@ -230,9 +142,8 @@ int trace_function(PyObject* obj, PyFrameObject* frame, int what, PyObject *arg)
 			uint64_t source_index = get_source_index(frame);
 			ThreadData* thread_data = get_current_thread_data();
 
-			/*
-			*/
-			thread_data->tracy_stack.push_back(___tracy_emit_zone_begin_alloc(source_index, 1));
+			auto ctx = ___tracy_emit_zone_begin_alloc(source_index, 1);
+			thread_data->tracy_stack.push_back(ctx);
 			break;
 		}
 		case PyTrace_EXCEPTION:
@@ -242,8 +153,6 @@ int trace_function(PyObject* obj, PyFrameObject* frame, int what, PyObject *arg)
 			break;
 		case PyTrace_RETURN:
 		{
-/*			
-			*/
 			print_current_function_name(frame, what);
 
 			ThreadData* thread_data = get_current_thread_data();
@@ -285,7 +194,7 @@ void initialize_call_stack(PyFrameObject* frame)
 	if (back)
 	{
 		initialize_call_stack(back);
-		// Py_DECREF(back);
+		Py_DECREF(back);
 	}
 
 	uint64_t source_index = get_source_index(frame);
@@ -328,6 +237,5 @@ static struct PyModuleDef pyTracyModule = {
 };
 
 PyMODINIT_FUNC PyInit_pytracy(void) {
-	// PyEval_SetProfile(trace_function, NULL);
 	return PyModule_Create(&pyTracyModule);
 };
