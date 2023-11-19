@@ -1,10 +1,13 @@
+import glob
 import os
 import shutil
+import sys
 
 from setuptools import setup, Extension
 from setuptools.command.build_ext import build_ext
 from setuptools.command.install import install
 from subprocess import check_call, run
+from pathlib import Path
 
 debug = False
 
@@ -55,9 +58,17 @@ class CMakeBuildExt(build_ext):
 		check_call(['cmake', '--build', '.', '--config', 'Release'])
 
 		self.include_dirs.append(os.path.join(cwd, self.build_temp, 'tracy', 'public', 'tracy'))
-		
+
 		if os.name == 'nt':
-			self.library_dirs.append(os.path.join(cwd, self.build_temp, 'tracy', 'Release'))
+			tracy_lib_path = glob.glob("**/TracyClient.lib", recursive=True)
+			assert len(tracy_lib_path) == 1
+
+			tracy_lib_dir = Path(tracy_lib_path[0]).parent.resolve()
+
+			# Print to stderr
+			print(f"Found TracyClient.lib in {tracy_lib_dir}", file=sys.stderr)
+
+			self.library_dirs.append(str(tracy_lib_dir))
 		else:
 			self.library_dirs.append(os.path.join(cwd, self.build_temp, 'tracy'))
 
@@ -71,10 +82,10 @@ class CustomInstall(install):
 		super().run()
 
 if os.name == 'nt':
-	extra_compile_args = []
+	extra_compile_args = ["/std:c++17"]
 	extra_link_args = []
 else:
-	extra_compile_args = []
+	extra_compile_args = ["-std=c++17"]
 	extra_link_args = ["-Wno-undef", "-ldl", "-lm"]
 
 if debug:
@@ -95,7 +106,7 @@ if debug:
 extension = Extension(
 	'pytracy',
 	['src/pyTracy.cpp'],
-	include_dirs=["tracy/public/tracy"],
+	include_dirs=["tracy/public/tracy", "src"],
 	libraries=['TracyClient'],
 
 	extra_compile_args=extra_compile_args,

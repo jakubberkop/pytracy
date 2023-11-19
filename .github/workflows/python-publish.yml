@@ -19,13 +19,11 @@ permissions:
   contents: read
 
 jobs:
-  build_wheels:
-    runs-on: ${{ matrix.os }}
+  build_wheels_windows:
+    runs-on: windows-2019
     strategy:
       matrix:
-        python-version: ["3.11"]
-        # os: [ubuntu-20.04, windows-2019, macOS-11]
-        os: [ubuntu-20.04, windows-2019]
+        python-version: ["3.9", "3.10", "3.11"]
 
     steps:
     - uses: actions/checkout@v4
@@ -34,19 +32,43 @@ jobs:
       uses: actions/setup-python@v3
       with:
         python-version: ${{ matrix.python-version }}
+
+    - name: CHECK MATE
+      run: python -c "import glob; print(glob.glob('**/*.lib', recursive=True))"
+
     - name: Install dependencies
-      run: |
-        pip install build twine cibuildwheel==2.16.2
+      run: pip install build
 
     - name: Build wheels
-      run: python -m cibuildwheel --output-dir wheelhouse
+      run: pip wheel . --no-deps --wheel-dir dist
 
     - uses: actions/upload-artifact@v3
       with:
-        path: ./wheelhouse/*.whl
+        name: artifact
+        path: dist
+
+  # build_wheels_linux:
+  #   runs-on: ubuntu-20.04
+
+  #   steps:
+  #   - uses: actions/checkout@v4
+
+  #   - name: Set up Python
+  #     uses: actions/setup-python@v3
+
+  #   - name: Install dependencies
+  #     run: pip install build twine cibuildwheel==2.16.2
+
+  #   - name: Build wheels
+  #     run: python -m cibuildwheel --output-dir wheelhouse
+
+  #   - uses: actions/upload-artifact@v3
+  #     with:
+  #       path: ./wheelhouse/*.whl
 
   upload_all:
-    needs: [build_wheels]
+    needs: [build_wheels_windows]
+    # needs: [build_wheels_windows, build_wheels_linux]
     permissions:
       id-token: write
     runs-on: ubuntu-latest
@@ -68,44 +90,3 @@ jobs:
         TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
       run: 
         twine upload dist/* --repository-url https://test.pypi.org/legacy/ --skip-existing
-
-    # - name: Build package
-    #   run: python -m build --sdist --wheel .
-
-        
-  # deploy-ubuntu:
-  #   runs-on: ubuntu-latest
-  #   strategy:
-  #     matrix:
-  #       python-version: ["3.11"]
-
-  #   steps:
-  #   - uses: actions/checkout@v3
-  #   - name: Set up Python
-  #     uses: actions/setup-python@v3
-  #     with:
-  #       python-version: ${{ matrix.python-version }}
-  #   - name: Install dependencies
-  #     run: |
-  #       python -m pip install --upgrade pip
-  #       pip install build twine
-
-  #   - name: Build wheels
-  #     uses: pypa/cibuildwheel@v2.12.3
-  #     env:
-  #       CIBW_BUILD: cp311-*
-
-  #   # - name: Build manylinux Python wheels
-  #   #   uses: RalfG/python-wheels-manylinux-build
-  #   #   with:
-  #   #     python-versions: 'cp310-cp310 cp311-cp311'
-  #   # - name: Auditwheel repair manylinux Python wheels
-  #   #   run: |
-  #   #     python -m pip install auditwheel
-  #   #     auditwheel repair dist/*.whl
-  #   - name: Publish wheels to PyPI
-  #     env:
-  #       TWINE_USERNAME: __token__
-  #       TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
-  #     run: 
-  #       twine upload dist/* --repository-url https://test.pypi.org/legacy/ --skip-existing
