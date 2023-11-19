@@ -4,5 +4,5 @@ build-backend = "setuptools.build_meta"
 requires-python = ">=3.9.0"
 
 [tool.cibuildwheel]
-build="cp38-manylinux_x86_64"
+skip = "*_{aarch64,ppc64le,s390x}"
 skip="pp*"
