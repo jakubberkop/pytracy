@@ -77,10 +77,6 @@ class CMakeBuildExt(build_ext):
 
 		super().run()
 
-class CustomInstall(install):
-	def run(self):
-		super().run()
-
 if os.name == 'nt':
 	extra_compile_args = ["/std:c++17"]
 	extra_link_args = []
@@ -106,7 +102,11 @@ if debug:
 extension = Extension(
 	'pytracy',
 	['src/pyTracy.cpp'],
-	include_dirs=["tracy/public/tracy", "src"],
+	include_dirs=[
+		"tracy/public/tracy",
+		"pybind11/include",
+		"src"
+	],
 	libraries=['TracyClient'],
 
 	extra_compile_args=extra_compile_args,
@@ -117,7 +117,6 @@ setup(name = 'pytracy',
 	version = '0.0.2',
 	cmdclass={
 	'build_ext': CMakeBuildExt,
-	'install': CustomInstall,
 	},
 	ext_modules=[extension],
 	packages=[""],

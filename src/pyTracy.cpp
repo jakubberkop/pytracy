@@ -1,5 +1,11 @@
-#include <Python.h>
-#include <frameobject.h>
+// #include <Python.h>
+// #include <frameobject.h>
+
+#define PYBIND11_DETAILED_ERROR_MESSAGES 1
+
+#include <pybind11/pybind11.h>
+
+namespace py = pybind11;
 
 #define TRACY_ENABLE
 #include <TracyC.h>
@@ -35,7 +41,7 @@ static ThreadData* get_current_thread_data()
 	return new_it.first->second;
 }
 
-static uint64_t get_source_index(PyFrameObject* frame)
+static uint64_t get_source_index_from_frame(PyFrameObject* frame)
 {
 	PyCodeObject* code = PyFrame_GetCode(frame);
 	int64_t line = PyFrame_GetLineNumber(frame);
@@ -124,14 +130,14 @@ void print_current_function_name(PyFrameObject* frame, int what)
 	ThreadData* thread_data = get_current_thread_data();
 	unsigned int thread_id = PyThread_get_thread_ident();
 
-	printf("T: %d PY %ld: Tracy %ld ", thread_id, get_frame_stack_size(frame), thread_data->tracy_stack.size());
-	printf("%s %s %d", fileName, funcname, line);
-	printf("\n");
+	// printf("T: %d PY %ld: Tracy %ld ", thread_id, get_frame_stack_size(frame), thread_data->tracy_stack.size());
+	// printf("%s %s %d", fileName, funcname, line);
+	// printf("\n");
 
 	Py_DECREF(code);
 }
 
-int trace_function(PyObject* obj, PyFrameObject* frame, int what, PyObject *arg)
+int on_trace_event(PyObject* obj, PyFrameObject* frame, int what, PyObject *arg)
 {
 	switch (what)
 	{
@@ -139,7 +145,7 @@ int trace_function(PyObject* obj, PyFrameObject* frame, int what, PyObject *arg)
 		{
 			print_current_function_name(frame, what);
 
-			uint64_t source_index = get_source_index(frame);
+			uint64_t source_index = get_source_index_from_frame(frame);
 			ThreadData* thread_data = get_current_thread_data();
 
 			auto ctx = ___tracy_emit_zone_begin_alloc(source_index, 1);
@@ -185,7 +191,14 @@ int trace_function(PyObject* obj, PyFrameObject* frame, int what, PyObject *arg)
 	return 0;
 }
 
-static bool is_tracing_enabled = false;
+enum class TracingMode
+{
+	Disabled = 0,
+	MarkedFunctions = 1,
+	All = 2
+};
+
+static TracingMode tracing_mode = TracingMode::Disabled;
 
 void initialize_call_stack(PyFrameObject* frame)
 {
@@ -197,45 +210,147 @@ void initialize_call_stack(PyFrameObject* frame)
 		Py_DECREF(back);
 	}
 
-	uint64_t source_index = get_source_index(frame);
+	uint64_t source_index = get_source_index_from_frame(frame);
 	ThreadData* thread_data = get_current_thread_data();
 
 	TracyCZoneCtx ctx = ___tracy_emit_zone_begin_alloc(source_index, 1);
 	thread_data->tracy_stack.push_back(ctx);
 }
 
-static PyObject* enable_tracing(PyObject*, PyObject*)
+static py::none set_tracing_mode(int _mode)
 {
-	if (is_tracing_enabled)
+	if (_mode < 0 || _mode > 2)
 	{
-		Py_INCREF(Py_None);
-		return Py_None;
+		throw std::invalid_argument("Invalid tracing mode");
 	}
 
-	PyThreadState* ts = PyThreadState_Get();
-	PyFrameObject* frame = PyThreadState_GetFrame(ts);
+	TracingMode mode = static_cast<TracingMode>(_mode);
 
-	initialize_call_stack(frame);
+	if (tracing_mode == mode)
+	{
+		return {};
+	}
 
-	PyEval_SetTrace(trace_function, NULL);
+	tracing_mode = mode;
 
-	Py_INCREF(Py_None);
-	return Py_None;
+	if (tracing_mode == TracingMode::Disabled)
+	{
+		PyEval_SetTrace(NULL, NULL);
+	}
+	else if (tracing_mode == TracingMode::MarkedFunctions)
+	{
+		PyThreadState* ts = PyThreadState_Get();
+		PyFrameObject* frame = PyThreadState_GetFrame(ts);
+		initialize_call_stack(frame);
+
+		PyEval_SetTrace(NULL, NULL);
+	}
+	else if (tracing_mode == TracingMode::All)
+	{
+		PyThreadState* ts = PyThreadState_Get();
+		PyFrameObject* frame = PyThreadState_GetFrame(ts);
+		initialize_call_stack(frame);
+
+		PyEval_SetTrace(on_trace_event, NULL);
+	}
+
+	printf("set_tracing_mode %d done\n", _mode);
+
+	return {};
 }
 
-static PyMethodDef moduleMethods[] = {
-	{"enableTracing", enable_tracing, METH_VARARGS, NULL},
-	{NULL, NULL, 0, NULL}
+static ___tracy_source_location_data native_function_source_location = { NULL, "Native function", "<unknown>", 0, 0 };
+class TracingFunctionWrapper
+{
+public:
+
+	TracingFunctionWrapper(py::function func)
+		: func(func) {}
+
+	void mark_function_enter() const
+	{
+		if (tracing_mode == TracingMode::MarkedFunctions)
+		{
+			return;
+		}
+
+		if (func.is_cpp_function())
+		{
+			TracyCZoneCtx ctx = ___tracy_emit_zone_begin(&native_function_source_location, 1);
+			ThreadData* thread_data = get_current_thread_data();
+			thread_data->tracy_stack.push_back(ctx);
+			return;
+		}
+
+		PyThreadState* ts = PyThreadState_Get();
+		PyFrameObject* frame = PyThreadState_GetFrame(ts);
+		
+		int64_t line = PyFrame_GetLineNumber(frame);
+
+		std::string func_name = func.attr("__code__").attr("co_name").cast<std::string>();
+		std::string file_name = func.attr("__code__").attr("co_filename").cast<std::string>();
+
+		uint64_t source_index = ___tracy_alloc_srcloc(line, file_name.c_str(), file_name.size(), func_name.c_str(), func_name.size());
+
+		ThreadData* thread_data = get_current_thread_data();
+
+		TracyCZoneCtx ctx = ___tracy_emit_zone_begin_alloc(source_index, 1);
+		thread_data->tracy_stack.push_back(ctx);
+	}
+
+	void mark_function_exit() const
+	{
+		if (tracing_mode == TracingMode::MarkedFunctions)
+		{
+			return;
+		}
+
+		ThreadData* thread_data = get_current_thread_data();
+
+		if (thread_data->tracy_stack.size() == 0)
+		{
+			printf("pytracy internal error: tracy_stack_index == 0\n");
+			return;
+		}
+
+		const auto ctx = thread_data->tracy_stack.back();
+		thread_data->tracy_stack.pop_back();
+		___tracy_emit_zone_end(ctx);
+	}
+
+	py::object call(py::args args) const
+	{
+		mark_function_enter();
+
+		py::object result;
+
+		if (args.size() == 0)
+		{
+			result = func();
+		}
+		else
+		{
+			result = func(args);
+		}
+
+		mark_function_exit();
+
+		return result;
+	}
+
+private:
+	py::function func;
 };
 
-static struct PyModuleDef pyTracyModule = {
-	PyModuleDef_HEAD_INIT,
-	"pytracy",
-	"Tracy Profiler bindings for Python",
-	-1,
-	moduleMethods
-};
 
-PyMODINIT_FUNC PyInit_pytracy(void) {
-	return PyModule_Create(&pyTracyModule);
+PYBIND11_MODULE(pytracy, m) {
+	m.doc() = "Tracy Profiler bindings for Python";
+
+	// m.def("enable_tracing", &enable_tracing, "Enables Tracy Profiler tracing");
+	// m.def("disable_tracing", &disable_tracing, "Disables Tracy Profiler tracing");
+	m.def("set_tracing_mode", &set_tracing_mode, "Sets Tracy Profiler tracing mode");
+
+	py::class_<TracingFunctionWrapper>(m, "trace_function")
+		.def(py::init<py::function>())
+		.def("__call__", &TracingFunctionWrapper::call);
 };
