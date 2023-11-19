@@ -95,7 +95,7 @@ if debug:
 extension = Extension(
 	'pytracy',
 	['src/pyTracy.cpp'],
-	include_dirs=["tracy/public/tracy"],
+	include_dirs=["tracy/public/tracy", "src"],
 	libraries=['TracyClient'],
 
 	extra_compile_args=extra_compile_args,
