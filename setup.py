@@ -1,6 +1,7 @@
+import glob
 import os
 import shutil
-import glob
+import sys
 
 from setuptools import setup, Extension
 from setuptools.command.build_ext import build_ext
@@ -63,6 +64,10 @@ class CMakeBuildExt(build_ext):
 			assert len(tracy_lib_path) == 1
 
 			tracy_lib_dir = Path(tracy_lib_path[0]).parent.resolve()
+
+			# Print to stderr
+			print(f"Found TracyClient.lib in {tracy_lib_dir}", file=sys.stderr)
+
 			self.library_dirs.append(str(tracy_lib_dir))
 		else:
 			self.library_dirs.append(os.path.join(cwd, self.build_temp, 'tracy'))
