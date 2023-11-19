@@ -25,8 +25,8 @@ class CMakeBuildExt(build_ext):
 		cwd = os.getcwd()
 
 		# Do a clean build every time
-		if os.path.exists(self.build_temp):
-			shutil.rmtree(self.build_temp)
+		# if os.path.exists(self.build_temp):
+		# 	shutil.rmtree(self.build_temp)
 
 		print("Building Tracy...")
 
@@ -120,4 +120,7 @@ setup(name = 'pytracy',
 	'install': CustomInstall,
 	},
 	ext_modules=[extension],
+	packages=[""],
+	package_dir={"": "src"},
+	package_data={"": ["*.pyi"]},
 )
