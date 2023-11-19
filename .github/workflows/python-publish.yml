@@ -19,7 +19,7 @@ permissions:
   contents: read
 
 jobs:
-  deploy-windows:
+  build_wheels:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -45,14 +45,26 @@ jobs:
       with:
         path: ./wheelhouse/*.whl
 
+  upload_all:
+    needs: [build_wheels]
+    permissions:
+      id-token: write
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/download-artifact@v3
+      with:
+        name: artifact
+        path: dist
+
+    - name: Publish wheels to PyPI
+      env:
+        TWINE_USERNAME: __token__
+        TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+      run: 
+        twine upload dist/* --repository-url https://test.pypi.org/legacy/ --skip-existing
+
     # - name: Build package
     #   run: python -m build --sdist --wheel .
-    # - name: Publish wheels to PyPI
-    #   env:
-    #     TWINE_USERNAME: __token__
-    #     TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
-    #   run: 
-    #     twine upload dist/* --repository-url https://test.pypi.org/legacy/ --skip-existing
 
         
   # deploy-ubuntu:
