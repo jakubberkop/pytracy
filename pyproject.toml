@@ -4,4 +4,5 @@ build-backend = "setuptools.build_meta"
 requires-python = ">=3.9.0"
 
 [tool.cibuildwheel]
+build=cp311-win_amd64
 skip = ["pp*", "*aarch64", "*ppc64le", "*s390x"]
