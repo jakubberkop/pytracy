@@ -1,3 +1,17 @@
+[project]
+name = "pytracy"
+version = "0.0.1"
+authors = [
+  { name="Jakub Berkop", email="jakub.berkop@gmail.com" },
+]
+description = "python package for tracing the performance of python code"
+requires-python = ">=3.9.0"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+
 [build-system]
 requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
