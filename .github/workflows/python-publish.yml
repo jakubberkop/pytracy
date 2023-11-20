@@ -87,6 +87,14 @@ jobs:
     - name: Publish wheels to PyPI
       env:
         TWINE_USERNAME: __token__
-        TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN_PRODUCTION }}
       run: 
-        twine upload dist/* --repository-url https://test.pypi.org/legacy/ --skip-existing
+        twine upload dist/* --repository-url https://upload.pypi.org/legacy/ --skip-existing
+    
+
+    # - name: Publish wheels to PyPI
+    #   env:
+    #     TWINE_USERNAME: __token__
+    #     TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+    #   run: 
+    #     twine upload dist/* --repository-url https://test.pypi.org/legacy/ --skip-existing
