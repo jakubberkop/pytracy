@@ -1,15 +1,22 @@
-# How to use
+# pytracy
+
 
 ## Installation 
+
+Download tracy profiler
+https://github.com/wolfpld/tracy/releases/tag/v0.10
+
+Download pytracy package
 `pip install pytracy`
 
-`import pytracy`
-
 ## Usage
-There are to ways to use pytracy
+There are two ways to use pytracy
 
-### Measure marked functions
+
+### 1. Measure marked functions
 ```
+import pytracy
+
 # Set tracing mode
 pytracy.set_tracing_mode(pytracy.TracingMode.MarkedFunctions)
 
@@ -20,9 +27,14 @@ def function_you_want_to_measure():
 ```
 Then use function_you_want_to_measure() as usual
 
-### Measure all functions - very slow (python limitation)
+### 2. Measure all functions - very slow (python limitation)
 
-`pytracy.set_tracing_mode(pytracy.TracingMode.All)`
+```
+import pytracy
+pytracy.set_tracing_mode(pytracy.TracingMode.All)
+```
+
+### Start measurement
 
 Then start the program you want to measure.
 Start Tracy profiler, program you want to measure should be shown in the list, if not set its ip address manually
