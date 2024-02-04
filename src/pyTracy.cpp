@@ -38,16 +38,15 @@ static void initialize_black_list()
 
 	during_black_list_initialization = true;
 
-	// Import site module using pybind11
-	py::module site_module = py::module::import("site");
+	py::module sys_module = py::module::import("sys");
+	py::list paths = sys_module.attr("path");
 
-	// Get the path list from the site module
-	black_list.insert(site_module.attr("getusersitepackages")().cast<std::string>());
-
-	// Add the paths to the path filter
-	for (const auto& path : site_module.attr("getsitepackages")())
+	for (int i = 1; i < paths.size(); i++)
 	{
-		black_list.insert(path.cast<std::string>());
+		std::string path_string = paths[i].cast<std::string>();
+
+		printf("Adding path to filter: %s\n", path_string.c_str());
+		black_list.insert(std::move(path_string));
 	}
 
 	filtering_enabled = true;
