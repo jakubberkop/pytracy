@@ -316,95 +316,60 @@ static py::none set_tracing_mode(int _mode)
 
 static ___tracy_source_location_data native_function_source_location = { NULL, "Native function", "<unknown>", 0, 0 };
 
-class TracingFunctionWrapper
+void mark_function_enter(py::function func)
 {
-public:
+	py::object code_object = func.attr("__code__");
+	auto func_name = code_object.attr("co_name").cast<std::string>();
+	auto file_name = code_object.attr("co_filename").cast<std::string>();
+	auto line = code_object.attr("co_firstlineno").cast<int64_t>();
 
-	TracingFunctionWrapper(py::function func)
-		: func(func)
-		{
-			py::object code_object = func.attr("__code__");
-			func_name = code_object.attr("co_name").cast<std::string>();
-			file_name = code_object.attr("co_filename").cast<std::string>();
-			line = code_object.attr("co_firstlineno").cast<int64_t>();
-		}
-
-	void mark_function_enter() const
+	if (tracing_mode != TracingMode::MarkedFunctions)
 	{
-		if (tracing_mode != TracingMode::MarkedFunctions)
-		{
-			return;
-		}
+		return;
+	}
 
-		if (func.is_cpp_function())
-		{
-			TracyCZoneCtx ctx = ___tracy_emit_zone_begin(&native_function_source_location, 1);
-			ThreadData* thread_data = get_current_thread_data();
-
-			// TODO: For now we are not filtering out native functions
-			thread_data->tracy_stack.push_back({ctx, false});
-			return;
-		}
-
-		uint64_t source_index = ___tracy_alloc_srcloc(line, file_name.c_str(), file_name.size(), func_name.c_str(), func_name.size());
+	if (func.is_cpp_function())
+	{
+		TracyCZoneCtx ctx = ___tracy_emit_zone_begin(&native_function_source_location, 1);
 		ThreadData* thread_data = get_current_thread_data();
 
-		if (source_index == INVALID_SOURCE_INDEX)
-		{
-			thread_data->tracy_stack.push_back({ {}, true });
-			return;
-		}
-
-		TracyCZoneCtx ctx = ___tracy_emit_zone_begin_alloc(source_index, 1);
+		// TODO: For now we are not filtering out native functions
 		thread_data->tracy_stack.push_back({ctx, false});
+		return;
 	}
 
-	void mark_function_exit() const
+	uint64_t source_index = ___tracy_alloc_srcloc(line, file_name.c_str(), file_name.size(), func_name.c_str(), func_name.size());
+	ThreadData* thread_data = get_current_thread_data();
+
+	if (source_index == INVALID_SOURCE_INDEX)
 	{
-		if (tracing_mode != TracingMode::MarkedFunctions)
-		{
-			return;
-		}
-
-		ThreadData* thread_data = get_current_thread_data();
-
-		if (thread_data->tracy_stack.size() == 0)
-		{
-			printf("pytracy internal error: tracy_stack_index == 0\n");
-			return;
-		}
-
-		const auto stack_data = thread_data->tracy_stack.back();
-		thread_data->tracy_stack.pop_back();
-		___tracy_emit_zone_end(stack_data.tracyCtx);
+		thread_data->tracy_stack.push_back({ {}, true });
+		return;
 	}
 
-	py::object call(py::args args) const
+	TracyCZoneCtx ctx = ___tracy_emit_zone_begin_alloc(source_index, 1);
+	thread_data->tracy_stack.push_back({ctx, false});
+}
+
+void mark_function_exit()
+{
+	if (tracing_mode != TracingMode::MarkedFunctions)
 	{
-		mark_function_enter();
-
-		py::object result;
-
-		if (args.size() == 0)
-		{
-			result = func();
-		}
-		else
-		{
-			result = func(args);
-		}
-
-		mark_function_exit();
-
-		return result;
+		return;
 	}
 
-private:
-	py::function func;
-	std::string func_name;
-	std::string file_name;
-	int64_t line;
-};
+	ThreadData* thread_data = get_current_thread_data();
+
+	if (thread_data->tracy_stack.size() == 0)
+	{
+		printf("pytracy internal error: tracy_stack_index == 0\n");
+		return;
+	}
+
+	const auto stack_data = thread_data->tracy_stack.back();
+	thread_data->tracy_stack.pop_back();
+	___tracy_emit_zone_end(stack_data.tracyCtx);
+}
 
 // TODO: Implement changing of the tracing mode during runtime
 py::none initialize_tracing_on_thread_start(py::args args, py::kwargs kwargs)
@@ -421,15 +386,24 @@ static void patch_threading_module()
 	settrace(py::cpp_function(initialize_tracing_on_thread_start));
 }
 
+py::object mark_function(py::function func)
+{
+	py::function wrapped_func = py::cpp_function([func](py::args args, const py::kwargs& kwargs) {
+		mark_function_enter(func);
+		py::object result = func(*args, **kwargs);
+		mark_function_exit();
+		return result;
+	});
+
+	return wrapped_func;
+}
+
 PYBIND11_MODULE(pytracy, m) {
 	m.doc() = "Tracy Profiler bindings for Python";
 	m.def("set_tracing_mode", &set_tracing_mode, "Sets Tracy Profiler tracing mode");
 	m.def("add_path_to_filter", &add_path_to_filter, "Adds a path to the path filter");
 	m.def("remove_from_black_list", &remove_from_black_list, "Removes a path from the path filter");
-
-	py::class_<TracingFunctionWrapper>(m, "mark_function")
-		.def(py::init<py::function>())
-		.def("__call__", &TracingFunctionWrapper::call);
+	m.def("mark_function", &mark_function, "Marks a function");
 
 	py::enum_<TracingMode>(m, "TracingMode")
 		.value("Disabled", TracingMode::Disabled)
