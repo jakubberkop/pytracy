@@ -33,6 +33,9 @@ static bool during_black_list_initialization = false;
 
 static void initialize_black_list()
 {
+	if (filtering_enabled)
+		return;
+
 	during_black_list_initialization = true;
 
 	// Import site module using pybind11
@@ -199,7 +202,6 @@ int on_trace_event(PyObject* obj, PyFrameObject* frame, int what, PyObject *arg)
 			break;
 		case PyTrace_RETURN:
 		{
-
 			ThreadData* thread_data = get_current_thread_data();
 
 			if (thread_data->tracy_stack.size() == 0)
@@ -264,22 +266,8 @@ void initialize_call_stack(PyFrameObject* frame)
 	thread_data->tracy_stack.push_back({ctx, false});
 }
 
-static py::none set_tracing_mode(int _mode)
+static void initialize_thread()
 {
-	if (_mode < 0 || _mode > 2)
-	{
-		throw std::invalid_argument("Invalid tracing mode");
-	}
-
-	TracingMode mode = static_cast<TracingMode>(_mode);
-
-	if (tracing_mode == mode)
-	{
-		return {};
-	}
-
-	tracing_mode = mode;
-
 	// TODO: Consider mode changes during runtime
 	if (tracing_mode == TracingMode::Disabled)
 	{
@@ -304,11 +292,31 @@ static py::none set_tracing_mode(int _mode)
 
 		PyEval_SetTrace(on_trace_event, NULL);
 	}
+}
+
+static py::none set_tracing_mode(int _mode)
+{
+	if (_mode < 0 || _mode > 2)
+	{
+		throw std::invalid_argument("Invalid tracing mode");
+	}
+
+	TracingMode mode = static_cast<TracingMode>(_mode);
+
+	if (tracing_mode == mode)
+	{
+		return {};
+	}
+
+	tracing_mode = mode;
+
+	initialize_thread();
 
 	return {};
 }
 
 static ___tracy_source_location_data native_function_source_location = { NULL, "Native function", "<unknown>", 0, 0 };
+
 class TracingFunctionWrapper
 {
 public:
@@ -399,6 +407,21 @@ private:
 	int64_t line;
 };
 
+// TODO: Implement changing of the tracing mode during runtime
+py::none initialize_tracing_on_thread_start(py::args args, py::kwargs kwargs)
+{
+	initialize_thread();
+	return py::none();
+}
+
+static void patch_threading_module()
+{
+	py::module threading_module = py::module::import("threading");
+	py::function settrace = threading_module.attr("settrace");
+
+	settrace(py::cpp_function(initialize_tracing_on_thread_start));
+}
+
 PYBIND11_MODULE(pytracy, m) {
 	m.doc() = "Tracy Profiler bindings for Python";
 	m.def("set_tracing_mode", &set_tracing_mode, "Sets Tracy Profiler tracing mode");
@@ -414,4 +437,6 @@ PYBIND11_MODULE(pytracy, m) {
 		.value("MarkedFunctions", TracingMode::MarkedFunctions)
 		.value("All", TracingMode::All)
 		.export_values();
+
+	patch_threading_module();
 };
