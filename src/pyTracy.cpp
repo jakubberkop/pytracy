@@ -56,6 +56,11 @@ static void add_path_to_filter(std::string path)
 	black_list.insert(std::move(path));
 }
 
+static void remove_from_black_list(std::string path)
+{
+	black_list.erase(path);
+}
+
 static std::vector<std::string> split_path(const std::string& path)
 {
 	std::vector<std::string> result;
@@ -397,8 +402,8 @@ private:
 PYBIND11_MODULE(pytracy, m) {
 	m.doc() = "Tracy Profiler bindings for Python";
 	m.def("set_tracing_mode", &set_tracing_mode, "Sets Tracy Profiler tracing mode");
-	m.def("initialize_black_list", &initialize_black_list, "Initializes the path filter");
 	m.def("add_path_to_filter", &add_path_to_filter, "Adds a path to the path filter");
+	m.def("remove_from_black_list", &remove_from_black_list, "Removes a path from the path filter");
 
 	py::class_<TracingFunctionWrapper>(m, "mark_function")
 		.def(py::init<py::function>())
