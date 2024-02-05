@@ -1,3 +1,4 @@
+from typing import List
 import unittest
 import pytracy
 
@@ -17,10 +18,10 @@ class Threads(unittest.TestCase):
 		def test_function():
 			pass
 
-		def worker(num):
+		def worker(_: int):
 			test_function()
 
-		threads = []
+		threads: List[threading.Thread] = []
 
 		for i in range(10):
 			t = threading.Thread(target=worker, args=(i,))
