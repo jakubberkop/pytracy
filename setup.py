@@ -75,7 +75,7 @@ class CMakeBuildExt(build_ext):
 		print("Building capture module...")
 
 		if os.name == "nt":
-			check_call(["cmd", "/C", "vcpkg/install_vcpkg_dependencies.bat"])
+			check_call(["cmd", "/C", "vcpkg\\install_vcpkg_dependencies.bat"])
 			check_call(["MSBuild.exe", "./capture/build/win32/capture.sln", "-p:Configuration=Release"])
 		elif os.name == "posix":
 			print("TODO: Build capture module for Linux")
@@ -127,7 +127,7 @@ setup(name = 'pytracy',
 	'build_ext': CMakeBuildExt,
 	},
 	ext_modules=[extension],
-	packages=[""],
+	packages=[],
 	package_dir={"": "src"},
 	package_data={"": ["*.pyi"]},
 )
