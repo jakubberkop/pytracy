@@ -44,8 +44,6 @@ static void initialize_black_list()
 	for (int i = 1; i < paths.size(); i++)
 	{
 		std::string path_string = paths[i].cast<std::string>();
-
-		printf("Adding path to filter: %s\n", path_string.c_str());
 		black_list.insert(std::move(path_string));
 	}
 
