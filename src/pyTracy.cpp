@@ -6,6 +6,7 @@ namespace py = pybind11;
 #include <TracyC.h>
 
 #include <mutex>
+#include <shared_mutex>
 #include <deque>
 #include <string_view>
 
@@ -23,10 +24,43 @@ struct ThreadData
 };
 
 robin_hood::unordered_map<uint64_t, ThreadData*> thread_data_map;
-std::mutex thread_data_mutex;
+std::shared_mutex thread_data_mutex;
 
 const uint64_t INVALID_SOURCE_INDEX = 0;
 
+// Compare the performance impact for threaded workloads
+// Non threaded gets 5% speedup
+class SharedLock
+{
+public:
+	SharedLock(std::shared_mutex& mutex) : m_mutex(mutex)
+	{
+		m_mutex.lock_shared();
+	}
+
+	~SharedLock()
+	{
+		m_mutex.unlock_shared();
+	}
+private:
+	std::shared_mutex& m_mutex;
+};
+
+class ExclusiveLock
+{
+public:
+	ExclusiveLock(std::shared_mutex& mutex) : m_mutex(mutex)
+	{
+		m_mutex.lock();
+	}
+
+	~ExclusiveLock()
+	{
+		m_mutex.unlock();
+	}
+private:
+	std::shared_mutex& m_mutex;
+};
 std::unordered_set<std::string> black_list;
 static bool filtering_enabled = false;
 static bool during_black_list_initialization = false;
@@ -125,13 +159,17 @@ static ThreadData* get_current_thread_data()
 {
 	uint64_t thread_id = PyThread_get_thread_ident();
 
-	std::lock_guard <std::mutex> lock(thread_data_mutex);
-
-	auto it = thread_data_map.find(thread_id);
-	if (it != thread_data_map.end())
 	{
-		return it->second;
+		SharedLock lock(thread_data_mutex);
+
+		auto it = thread_data_map.find(thread_id);
+		if (it != thread_data_map.end())
+		{
+			return it->second;
+		}
 	}
+
+	ExclusiveLock lock(thread_data_mutex);
 
 	auto new_it = thread_data_map.emplace(thread_id, new ThreadData{});
 	return new_it.first->second;
