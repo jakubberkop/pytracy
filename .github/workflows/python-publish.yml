@@ -44,7 +44,7 @@ jobs:
 
     - uses: actions/upload-artifact@v4.4.3
       with:
-        name: artifact
+        name: artifact_windows_${{ matrix.python-version }}
         path: dist
 
   build_wheels_linux:
@@ -67,6 +67,7 @@ jobs:
     - uses: actions/upload-artifact@v4.4.3
       with:
         path: ./wheelhouse/*.whl
+        name: artifact_linux
 
   upload_all:
     needs: [build_wheels_windows, build_wheels_linux]
@@ -79,7 +80,8 @@ jobs:
     steps:
     - uses: actions/download-artifact@v4.1.8
       with:
-        name: artifact
+        pattern: artifact_*
+        merge: true
         path: dist
 
     - name: Set up Python
@@ -94,11 +96,3 @@ jobs:
         TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN_PRODUCTION }}
       run: 
         twine upload dist/* --repository-url https://upload.pypi.org/legacy/ --skip-existing
-    
-
-    # - name: Publish wheels to PyPI
-    #   env:
-    #     TWINE_USERNAME: __token__
-    #     TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
-    #   run: 
-    #     twine upload dist/* --repository-url https://test.pypi.org/legacy/ --skip-existing
