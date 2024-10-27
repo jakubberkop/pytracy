@@ -44,7 +44,7 @@ jobs:
 
     - uses: actions/upload-artifact@v3
       with:
-        path: ./wheelhouse/*.whl
+        path: dist
 
   build_wheels_linux:
     runs-on: ubuntu-20.04
