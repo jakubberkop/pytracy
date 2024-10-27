@@ -41,7 +41,7 @@ class CMakeBuildExt(build_ext):
 		# # Change directory to Tracy repository
 		os.chdir('tracy')
 
-		run(['git', 'checkout', 'v0.10'])
+		run(['git', 'checkout', 'v0.11.1'])
 
 		# Run cmake so that it generates shared libraries
 		# Compile with flags -fPIC -Wl and --no-undefined
