@@ -1,3 +1,4 @@
+#define PYBIND11_DETAILED_ERROR_MESSAGES 1
 #include <pybind11/pybind11.h>
 
 namespace py = pybind11;
@@ -61,16 +62,94 @@ public:
 private:
 	std::shared_mutex& m_mutex;
 };
+
 std::unordered_set<std::string> black_list;
 static bool filtering_enabled = false;
 static bool during_black_list_initialization = false;
 
-static void initialize_black_list()
+py::list get_stdlib_paths()
+{
+	py::module os_module = py::module::import("os");
+	py::module sys_module = py::module::import("sys");
+	py::module inspect_module = py::module::import("inspect");
+
+	py::function dirname_func = os_module.attr("path").attr("dirname");
+	py::function getsourcefile_func = inspect_module.attr("getsourcefile");
+
+	py::str os_module_dir = dirname_func(getsourcefile_func(os_module));
+
+	py::list result;
+	result.append(os_module_dir);
+
+	return result;
+}
+
+py::list get_libraries_paths()
+{
+	py::module os_module = py::module::import("os");
+	py::module sys_module = py::module::import("sys");
+	py::module inspect_module = py::module::import("inspect");
+
+	py::list paths = sys_module.attr("path");
+
+	py::list stdlib_paths = get_stdlib_paths();
+	py::list result;
+
+	for (int i = 1; i < paths.size(); i++)
+	{
+		if (stdlib_paths.contains(paths[i]))
+			continue;
+
+		result.append(paths[i]);
+	}
+
+	return result;
+}
+
+// def set_filtering_mode(stdlib: bool, third_party: bool, user: bool) -> None: ...
+py::none set_filtering_mode(bool stdlib, bool third_party, bool user)
+{
+	black_list.clear();
+
+	if (stdlib)
+	{
+		for (const auto& path : get_stdlib_paths())
+		{
+			black_list.insert(path.cast<std::string>());
+		}
+	}
+
+	if (third_party)
+	{
+		for (const auto& path : get_libraries_paths())
+		{
+			black_list.insert(path.cast<std::string>());
+		}
+	}
+
+	return py::none();
+}
+
+
+// def get_filtering_mode() -> Tuple[bool, bool, bool]: ...
+// TODO: Implement
+py::tuple get_filtering_mode()
+{
+	bool stdlib = false;
+	bool third_party = false;
+	bool user = false;
+
+	return py::make_tuple(stdlib, third_party, user);
+}
+
+static void initialize_filtering()
 {
 	if (filtering_enabled)
 		return;
 
 	during_black_list_initialization = true;
+
+	set_filtering_mode(true, true, false);
 
 	py::module sys_module = py::module::import("sys");
 	py::list paths = sys_module.attr("path");
@@ -83,16 +162,6 @@ static void initialize_black_list()
 
 	filtering_enabled = true;
 	during_black_list_initialization = false;
-}
-
-static void add_path_to_filter(std::string path)
-{
-	black_list.insert(std::move(path));
-}
-
-static void remove_from_black_list(std::string path)
-{
-	black_list.erase(path);
 }
 
 static std::vector<std::string> split_path(const std::string& path)
@@ -318,7 +387,7 @@ static void initialize_thread()
 	}
 	else if (tracing_mode == TracingMode::All)
 	{
-		initialize_black_list();
+		initialize_filtering();
 
 		PyThreadState* ts = PyThreadState_Get();
 		PyFrameObject* frame = PyThreadState_GetFrame(ts);
@@ -340,29 +409,29 @@ static py::none set_tracing_mode(int _mode)
 
 	if (tracing_mode == mode)
 	{
-		return {};
+		return py::none();
 	}
 
 	tracing_mode = mode;
 
 	initialize_thread();
 
-	return {};
+	return py::none();
 }
 
 static ___tracy_source_location_data native_function_source_location = { NULL, "Native function", "<unknown>", 0, 0 };
 
 void mark_function_enter(py::function func)
 {
-	py::object code_object = func.attr("__code__");
-	auto func_name = code_object.attr("co_name").cast<std::string>();
-	auto file_name = code_object.attr("co_filename").cast<std::string>();
-	auto line = code_object.attr("co_firstlineno").cast<int64_t>();
-
 	if (tracing_mode != TracingMode::MarkedFunctions)
 	{
 		return;
 	}
+
+	py::object code_object = func.attr("__code__");
+	auto func_name = code_object.attr("co_name").cast<std::string>();
+	auto file_name = code_object.attr("co_filename").cast<std::string>();
+	auto line = code_object.attr("co_firstlineno").cast<int64_t>();
 
 	if (func.is_cpp_function())
 	{
@@ -407,7 +476,6 @@ void mark_function_exit()
 	___tracy_emit_zone_end(stack_data.tracyCtx);
 }
 
-// TODO: Implement changing of the tracing mode during runtime
 py::none initialize_tracing_on_thread_start(py::args args, py::kwargs kwargs)
 {
 	initialize_thread();
@@ -434,12 +502,50 @@ py::object mark_function(py::function func)
 	return wrapped_func;
 }
 
+// filtered_out_folders() -> List[str]: ...
+py::list get_filtered_out_folders()
+{
+	py::list result;
+
+	for (const auto& path : black_list)
+	{
+		result.append(path);
+	}
+
+	return result;
+}
+
+// set_filtered_out_folders(files: List[str]) -> None: ...
+py::none set_filtered_out_folders(py::list files)
+{
+	// Ensure that files are all strings
+	for (const auto& path : files)
+	{
+		if (!py::isinstance<py::str>(path))
+		{
+			throw std::invalid_argument("All elements of the list must be strings");
+		}
+	}
+
+	black_list.clear();
+
+	for (const auto& path : files)
+	{
+		black_list.insert(path.cast<std::string>());
+	}
+
+	return py::none();
+}
+
 PYBIND11_MODULE(pytracy, m) {
 	m.doc() = "Tracy Profiler bindings for Python";
 	m.def("set_tracing_mode", &set_tracing_mode, "Sets Tracy Profiler tracing mode");
-	m.def("add_path_to_filter", &add_path_to_filter, "Adds a path to the path filter");
-	m.def("remove_from_black_list", &remove_from_black_list, "Removes a path from the path filter");
 	m.def("mark_function", &mark_function, "Marks a function");
+
+	m.def("get_filtered_out_folders", &get_filtered_out_folders, "Returns a list of filtered out folders");
+
+	m.def("set_filtering_mode", &set_filtering_mode, "Sets the filtering mode for the profiler");
+	m.def("get_filtering_mode", &get_filtering_mode, "Returns the filtering mode for the profiler");
 
 	py::enum_<TracingMode>(m, "TracingMode")
 		.value("Disabled", TracingMode::Disabled)
