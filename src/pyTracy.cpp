@@ -274,7 +274,7 @@ static uint64_t get_source_index_from_frame(PyFrameObject* frame)
 	assert(file_name != 0);
 	assert(func_name != 0);
 
-	uint64_t source_index = ___tracy_alloc_srcloc(line, file_name, file_name_len, func_name, func_name_len);
+	uint64_t source_index = ___tracy_alloc_srcloc(line, file_name, file_name_len, func_name, func_name_len, 0);
 
 	Py_DECREF(code);
 
@@ -443,7 +443,7 @@ void mark_function_enter(py::function func)
 		return;
 	}
 
-	uint64_t source_index = ___tracy_alloc_srcloc(line, file_name.c_str(), file_name.size(), func_name.c_str(), func_name.size());
+	uint64_t source_index = ___tracy_alloc_srcloc(line, file_name.c_str(), file_name.size(), func_name.c_str(), func_name.size(), 0);
 	ThreadData* thread_data = get_current_thread_data();
 
 	if (source_index == INVALID_SOURCE_INDEX)
