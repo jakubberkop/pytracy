@@ -54,10 +54,10 @@ class CMakeBuildExt(build_ext):
 			raise Exception("Unsupported OS")
 
 
-		# check_call(['cmake', "."])
+		check_call(['cmake', "."])
 
 		# Run make to build Tracy
-		check_call(['cmake', '--build', '.', '--config', 'Debug'])
+		check_call(['cmake', '--build', '.', '--config', 'Release'])
 
 		self.include_dirs.append(os.path.join(cwd, self.build_temp, 'tracy', 'public', 'tracy'))
 
