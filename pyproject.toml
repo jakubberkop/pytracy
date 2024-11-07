@@ -1,6 +1,6 @@
 [project]
 name = "pytracy"
-version = "0.0.1"
+version = "0.0.2"
 authors = [
   { name="Jakub Berkop", email="jakub.berkop@gmail.com" },
 ]
@@ -17,6 +17,12 @@ classifiers = [
 requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
 requires-python = ">=3.9.0"
+
+[tool.setuptools.packages.find]
+where = ["extra"]
+
+[tool.setuptools.package-data]
+"*" = ["py.typed", "__init__.pyi"]
 
 [tool.cibuildwheel]
 skip = ["pp*", "*aarch64", "*ppc64le", "*s390x"]
