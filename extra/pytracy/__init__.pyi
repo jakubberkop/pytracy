@@ -7,25 +7,17 @@ Importing this module initializes the default filter_out_folders and calls threa
 This means that debugging doesn't work after importing this module.
 This undesirable, so it is recommended to only import this module when you want to start tracing.
 
-Current limitations:
-- Debugging doesn't work after importing this module.
-- High overhead when using *TracingMode.All* mode. This is the limitation of python tracing api.
-- No visibility into functions run using multiprocessing.
-- set_tracing_mode doesn't work across multiple threads.
-
 """
-from typing import Any, Callable, List
+from typing import List
 from enum import Enum
 
 """
 Specifies different tracing modes.
 - Disabled: No tracing is done.
-- MarkedFunctions: Only functions decorated with mark_function are traced. Low overhead.
 - All: All functions are traced. High overhead, comparable to running with debugger attached.
 """
 class TracingMode(Enum):
 	Disabled = 0
-	MarkedFunctions = 1
 	All = 2
 
 """
@@ -34,23 +26,6 @@ Enables or disables tracing of function calls.
 
 """
 def set_tracing_mode(mode: TracingMode) -> None: ...
-
-"""
-Decorates a function to be traced, only active when the tracing mode is set to MarkedFunctions.
-
-Example:
-```
-@mark_function
-def my_function():
-	pass
-
-set_tracing_mode(TracingMode.MarkedFunctions)
-
-my_function()
-```
-
-"""
-def mark_function(func: Callable[..., Any]) -> Callable[..., Any] : ...
 
 """
 Sets which folders should be ignored when tracing.
