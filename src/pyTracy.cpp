@@ -315,17 +315,35 @@ struct ProcessedFunctionData
 	int64_t line;
 };
 
-// TODO: Make multi-threaded
+namespace std
+{
+	template<>
+	struct hash<std::pair<PyCodeObject*, PyFrameObject*>>
+	{
+		size_t operator()(const std::pair<PyCodeObject*, PyFrameObject*>& pair) const
+		{
+			return std::hash<void*>{}(pair.first) ^ std::hash<void*>{}(pair.second);
+		}
+	};
+}
+
 robin_hood::unordered_map<std::pair<PyCodeObject*, PyFrameObject*>, ProcessedFunctionData*> function_data;
+std::shared_mutex function_data_mutex;
 
 ProcessedFunctionData* get_function_data(PyCodeObject* code, PyFrameObject* frame)
 {
 	const auto pair = std::make_pair(code, frame);
-	auto it = function_data.find(pair);
-	if (it != function_data.end())
 	{
-		return it->second;
+		SharedLock lock(function_data_mutex);
+		auto it = function_data.find(pair);
+		if (it != function_data.end())
+		{
+			return it->second;
+		}
 	}
+
+	// We need to grab the whole function_data_mutex, as we are inserting a new element
+	ExclusiveLock lock(function_data_mutex);
 
 	Py_ssize_t file_name_len;
 	Py_ssize_t func_name_len;
