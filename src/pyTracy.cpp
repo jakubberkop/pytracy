@@ -130,7 +130,6 @@ PyTracyGlobalImports& get_global_imports()
 	return global_imports.value();
 }
 
-
 py::list get_stdlib_paths()
 {
 	py::module os_module = get_global_imports().os_module;
@@ -308,10 +307,25 @@ static ThreadData* get_current_thread_data()
 	return new_it.first->second;
 }
 
-static uint64_t get_source_index_from_frame(PyFrameObject* frame)
+struct ProcessedFunctionData
 {
-	PyCodeObject* code = PyFrame_GetCode(frame);
-	assert(code != 0);
+	std::string file_name;
+	std::string func_name;
+	std::string full_qual_name;
+	int64_t line;
+};
+
+// TODO: Make multi-threaded
+robin_hood::unordered_map<std::pair<PyCodeObject*, PyFrameObject*>, ProcessedFunctionData*> function_data;
+
+ProcessedFunctionData* get_function_data(PyCodeObject* code, PyFrameObject* frame)
+{
+	const auto pair = std::make_pair(code, frame);
+	auto it = function_data.find(pair);
+	if (it != function_data.end())
+	{
+		return it->second;
+	}
 
 	Py_ssize_t file_name_len;
 	Py_ssize_t func_name_len;
@@ -323,18 +337,13 @@ static uint64_t get_source_index_from_frame(PyFrameObject* frame)
 
 	int64_t line = code->co_firstlineno;
 
-	if (during_filter_list_initialization)
-	{
-		return INVALID_SOURCE_INDEX;
-	}
-
 	if (filtering_enabled)
 	{
 		std::string_view file_name_str(file_name, file_name_len);
 
 		if (!is_path_acceptable(file_name_str))
 		{
-			return INVALID_SOURCE_INDEX;
+			return nullptr;
 		}
 	}
 
@@ -342,20 +351,10 @@ static uint64_t get_source_index_from_frame(PyFrameObject* frame)
 	assert(func_name != 0);
 	assert(qual_name != 0);
 
-	std::string with_replaced_dots {qual_name, (size_t)qual_name_len};
 	std::string full_qual_name;
 
-#if 1
-	PyTracyGlobalImports& globals = get_global_imports();
-
-	py::module inspect_module = globals.inspect_module;
-	
-	py::object f_back = globals.inspect_currentframe().attr("f_back");
-	py::object module = globals.inspect_getmodule(f_back);
-
-#else
-	py::object module = py::none();
-#endif
+	py::handle f_back = py::handle((PyObject*)frame);
+	py::object module = get_global_imports().inspect_getmodule(f_back);
 
 	if (module.is_none())
 	{
@@ -364,17 +363,41 @@ static uint64_t get_source_index_from_frame(PyFrameObject* frame)
 	else
 	{
 		py::str module_name = module.attr("__name__");
-		full_qual_name = module_name.cast<std::string>() + "." + with_replaced_dots;
+		full_qual_name = module_name.cast<std::string>() + "." + std::string(qual_name, (size_t)qual_name_len);
 	}
 
-	// uint64_t source_index = ___tracy_alloc_srcloc(line, file_name, file_name_len, func_name, func_name_len, 0);
-	// uint64_t source_index = ___tracy_alloc_srcloc(line, file_name, file_name_len, qual_name, qual_name_len, 0);
-	uint64_t source_index = ___tracy_alloc_srcloc(line, file_name, file_name_len, full_qual_name.c_str(), full_qual_name.size(), 0);
-	// uint64_t source_index = ___tracy_alloc_srcloc_name(line, file_name, file_name_len, func_name, func_name_len, qual_name, qual_name_len, 0);
-	// uint64_t source_index = ___tracy_alloc_srcloc_name(line, file_name, file_name_len, with_replaced_dots.c_str(), with_replaced_dots.size(), qual_name, qual_name_len, 0);
-	// uint64_t source_index = ___tracy_alloc_srcloc(line, file_name, file_name_len, with_replaced_dots.c_str(), with_replaced_dots.size(), 0);
+	// This purposefully leaks memory, as it has to be kept alive for the entire program lifetime
+	auto data = new ProcessedFunctionData{ file_name, func_name, full_qual_name, line };
 
-	Py_DECREF(code);
+	function_data[pair] = data;
+
+	return data;
+}
+
+static uint64_t get_source_index_from_frame(PyFrameObject* frame)
+{
+	if (during_filter_list_initialization)
+	{
+		return INVALID_SOURCE_INDEX;
+	}
+
+	PyCodeObject* code = PyFrame_GetCode(frame);
+	// We purposefully dont Py_DECREF(code), as we need to keep it alive for the entire program lifetime
+	// This way we can know if we have already processed this code object
+	assert(code != 0);
+
+	ProcessedFunctionData* data = get_function_data(code, frame);
+	if (data == nullptr)
+	{
+		return INVALID_SOURCE_INDEX;
+	}
+
+	uint64_t source_index = ___tracy_alloc_srcloc(
+		data->line,
+		data->file_name.c_str(), data->file_name.size(),
+		data->full_qual_name.c_str(), data->full_qual_name.size(),
+		0
+	);
 
 	return source_index;
 }
