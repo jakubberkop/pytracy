@@ -2,7 +2,7 @@ import time
 import os
 
 import pytracy
-pytracy.enableTracing()
+pytracy.set_tracing_mode(pytracy.TracingMode.All)
 
 
 def a(i):
