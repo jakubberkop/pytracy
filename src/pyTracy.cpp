@@ -65,11 +65,77 @@ std::unordered_set<std::string> filter_list;
 static bool filtering_enabled = false;
 static bool during_filter_list_initialization = false;
 
+struct PyTracyGlobalImports
+{
+	PyTracyGlobalImports()
+	{
+		pybind11::gil_scoped_acquire gil;
+
+		os_module = py::module::import("os");
+		sys_module = py::module::import("sys");
+		inspect_module = py::module::import("inspect");
+		threading_module = py::module::import("threading");
+
+		inspect_currentframe = inspect_module.attr("currentframe");
+		inspect_getmodule =  inspect_module.attr("getmodule");
+	}
+
+	PyTracyGlobalImports &operator=(const PyTracyGlobalImports&) = delete;
+	PyTracyGlobalImports(const PyTracyGlobalImports&) = delete;
+
+	PyTracyGlobalImports &operator=(PyTracyGlobalImports&& other)
+	{
+		pybind11::gil_scoped_acquire gil;
+
+		py::gil_scoped_acquire acquire;
+		os_module = std::move(other.os_module);
+		sys_module = std::move(other.sys_module);
+		inspect_module = std::move(other.inspect_module);
+		threading_module = std::move(other.threading_module);
+		inspect_currentframe = std::move(other.inspect_currentframe);
+		inspect_getmodule = std::move(other.inspect_getmodule);
+
+		return *this;
+	}
+
+	PyTracyGlobalImports(PyTracyGlobalImports&& other)
+	{
+		pybind11::gil_scoped_acquire gil;
+
+		os_module = std::move(other.os_module);
+		sys_module = std::move(other.sys_module);
+		inspect_module = std::move(other.inspect_module);
+		threading_module = std::move(other.threading_module);
+		inspect_currentframe = std::move(other.inspect_currentframe);
+		inspect_getmodule = std::move(other.inspect_getmodule);
+	}
+
+	py::module os_module;
+	py::module sys_module;
+	py::module inspect_module;
+	py::module threading_module;
+	py::object inspect_currentframe;
+	py::object inspect_getmodule;
+};
+
+std::optional<PyTracyGlobalImports> global_imports = std::nullopt;
+
+PyTracyGlobalImports& get_global_imports()
+{
+	if (!global_imports.has_value())
+	{
+		global_imports = PyTracyGlobalImports{};
+	}
+
+	return global_imports.value();
+}
+
+
 py::list get_stdlib_paths()
 {
-	py::module os_module = py::module::import("os");
-	py::module sys_module = py::module::import("sys");
-	py::module inspect_module = py::module::import("inspect");
+	py::module os_module = get_global_imports().os_module;
+	py::module sys_module = get_global_imports().sys_module;
+	py::module inspect_module = get_global_imports().inspect_module;
 
 	py::function dirname_func = os_module.attr("path").attr("dirname");
 	py::function getsourcefile_func = inspect_module.attr("getsourcefile");
@@ -84,9 +150,9 @@ py::list get_stdlib_paths()
 
 py::list get_libraries_paths()
 {
-	py::module os_module = py::module::import("os");
-	py::module sys_module = py::module::import("sys");
-	py::module inspect_module = py::module::import("inspect");
+	py::module os_module = get_global_imports().os_module;
+	py::module sys_module = get_global_imports().sys_module;
+	py::module inspect_module = get_global_imports().inspect_module;
 
 	py::list paths = sys_module.attr("path");
 
@@ -249,9 +315,12 @@ static uint64_t get_source_index_from_frame(PyFrameObject* frame)
 
 	Py_ssize_t file_name_len;
 	Py_ssize_t func_name_len;
+	Py_ssize_t qual_name_len;
 
 	const char* file_name = PyUnicode_AsUTF8AndSize(code->co_filename, &file_name_len);
 	const char* func_name = PyUnicode_AsUTF8AndSize(code->co_name, &func_name_len);
+	const char* qual_name = PyUnicode_AsUTF8AndSize(code->co_qualname, &qual_name_len);
+
 	int64_t line = code->co_firstlineno;
 
 	if (during_filter_list_initialization)
@@ -271,8 +340,39 @@ static uint64_t get_source_index_from_frame(PyFrameObject* frame)
 
 	assert(file_name != 0);
 	assert(func_name != 0);
+	assert(qual_name != 0);
 
-	uint64_t source_index = ___tracy_alloc_srcloc(line, file_name, file_name_len, func_name, func_name_len, 0);
+	std::string with_replaced_dots {qual_name, (size_t)qual_name_len};
+	std::string full_qual_name;
+
+#if 1
+	PyTracyGlobalImports& globals = get_global_imports();
+
+	py::module inspect_module = globals.inspect_module;
+	
+	py::object f_back = globals.inspect_currentframe().attr("f_back");
+	py::object module = globals.inspect_getmodule(f_back);
+
+#else
+	py::object module = py::none();
+#endif
+
+	if (module.is_none())
+	{
+		full_qual_name = std::string(qual_name, (size_t)qual_name_len);
+	}
+	else
+	{
+		py::str module_name = module.attr("__name__");
+		full_qual_name = module_name.cast<std::string>() + "." + with_replaced_dots;
+	}
+
+	// uint64_t source_index = ___tracy_alloc_srcloc(line, file_name, file_name_len, func_name, func_name_len, 0);
+	// uint64_t source_index = ___tracy_alloc_srcloc(line, file_name, file_name_len, qual_name, qual_name_len, 0);
+	uint64_t source_index = ___tracy_alloc_srcloc(line, file_name, file_name_len, full_qual_name.c_str(), full_qual_name.size(), 0);
+	// uint64_t source_index = ___tracy_alloc_srcloc_name(line, file_name, file_name_len, func_name, func_name_len, qual_name, qual_name_len, 0);
+	// uint64_t source_index = ___tracy_alloc_srcloc_name(line, file_name, file_name_len, with_replaced_dots.c_str(), with_replaced_dots.size(), qual_name, qual_name_len, 0);
+	// uint64_t source_index = ___tracy_alloc_srcloc(line, file_name, file_name_len, with_replaced_dots.c_str(), with_replaced_dots.size(), 0);
 
 	Py_DECREF(code);
 
@@ -482,7 +582,7 @@ py::none initialize_tracing_on_thread_start(py::args args, py::kwargs kwargs)
 
 static void patch_threading_module()
 {
-	py::module threading_module = py::module::import("threading");
+	py::module threading_module = get_global_imports().threading_module;
 	py::function settrace = threading_module.attr("settrace");
 
 	settrace(py::cpp_function(initialize_tracing_on_thread_start));
@@ -527,6 +627,7 @@ PYBIND11_MODULE(pytracy, m) {
 	m.doc() = "Tracy Profiler bindings for Python";
 	m.def("set_tracing_mode", &set_tracing_mode, "Sets Tracy Profiler tracing mode");
 
+	m.def("set_filtered_out_folders", &set_filtered_out_folders, "Sets which folders should be ignored while profiling");
 	m.def("get_filtered_out_folders", &get_filtered_out_folders, "Returns a list of filtered out folders");
 
 	m.def("set_filtering_mode", &set_filtering_mode, "Sets the filtering mode for the profiler");
