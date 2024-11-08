@@ -13,14 +13,20 @@ Download Tracy profiler from [Tracy Github](https://github.com/wolfpld/tracy/rel
 - Use the provided script for Ubuntu to install dependencies and build the Tracy Profiler - scripts\build_tracy_ubuntu.sh
 
 ## Usage
-There are two ways to use pytracy
-
-1. Marking functions to be measured:
+1. Enable the profiler
 ```(python)
 import pytracy
+pytracy.set_tracing_mode(pytracy.TracingMode.All)
+```
+2. Start your script
+3. Start Tracy profiler and click connect
 
-# Set tracing mode
-pytracy.set_tracing_mode(pytracy.TracingMode.MarkedFunctions)
+## Limitations:
+- Debugging is not possible when using *TracingMode.All* mode. This is the limitation of python tracing api.
+- High overhead when using *TracingMode.All* mode. This is the limitation of python tracing api.
+- Limited support for multithreading. Tracing mode changes are local to the thread. TODO
+- set_tracing_mode doesn't work for already started threads. It to be called before other threads are started.
+- No visibility into functions run using multiprocessing.
 
 # Mark function you want to measure
 @pytracy.mark_function
