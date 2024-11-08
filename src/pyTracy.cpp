@@ -490,18 +490,6 @@ static void patch_threading_module()
 	settrace(py::cpp_function(initialize_tracing_on_thread_start));
 }
 
-py::object mark_function(py::function func)
-{
-	py::function wrapped_func = py::cpp_function([func](py::args args, const py::kwargs& kwargs) {
-		mark_function_enter(func);
-		py::object result = func(*args, **kwargs);
-		mark_function_exit();
-		return result;
-	});
-
-	return wrapped_func;
-}
-
 // filtered_out_folders() -> List[str]: ...
 py::list get_filtered_out_folders()
 {
@@ -540,7 +528,6 @@ py::none set_filtered_out_folders(py::list files)
 PYBIND11_MODULE(pytracy, m) {
 	m.doc() = "Tracy Profiler bindings for Python";
 	m.def("set_tracing_mode", &set_tracing_mode, "Sets Tracy Profiler tracing mode");
-	m.def("mark_function", &mark_function, "Marks a function");
 
 	m.def("get_filtered_out_folders", &get_filtered_out_folders, "Returns a list of filtered out folders");
 
