@@ -20,7 +20,7 @@ from enum import Enum
 """
 Specifies different tracing modes.
 - Disabled: No tracing is done.
-- MarkedFunctions: Only functions decorated with mark_function are traced. Very low overhead.
+- MarkedFunctions: Only functions decorated with mark_function are traced. Low overhead.
 - All: All functions are traced. High overhead, comparable to running with debugger attached.
 """
 class TracingMode(Enum):
@@ -54,7 +54,7 @@ def mark_function(func: Callable[..., Any]) -> Callable[..., Any] : ...
 
 """
 Sets which folders should be ignored when tracing.
-Resets previously set filtered_out_folders.
+Resets previously set_filtered_out_folders.
 
 :param stdlib: Whether to ignore standard library folders.
 :param third_party: Whether to ignore third party folders.
