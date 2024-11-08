@@ -1,4 +1,4 @@
-#define PYBIND11_DETAILED_ERROR_MESSAGES 1
+#define PYBIND11_DETAILED_ERROR_MESSAGES 0
 #include <pybind11/pybind11.h>
 
 namespace py = pybind11;
@@ -29,43 +29,41 @@ std::shared_mutex thread_data_mutex;
 
 const uint64_t INVALID_SOURCE_INDEX = 0;
 
-// Compare the performance impact for threaded workloads
-// Non threaded gets 5% speedup
 class SharedLock
 {
 public:
-	SharedLock(std::shared_mutex& mutex) : m_mutex(mutex)
+	SharedLock(std::shared_mutex& mutex) : mutex(mutex)
 	{
-		m_mutex.lock_shared();
+		mutex.lock_shared();
 	}
 
 	~SharedLock()
 	{
-		m_mutex.unlock_shared();
+		mutex.unlock_shared();
 	}
 private:
-	std::shared_mutex& m_mutex;
+	std::shared_mutex& mutex;
 };
 
 class ExclusiveLock
 {
 public:
-	ExclusiveLock(std::shared_mutex& mutex) : m_mutex(mutex)
+	ExclusiveLock(std::shared_mutex& mutex) : mutex(mutex)
 	{
-		m_mutex.lock();
+		mutex.lock();
 	}
 
 	~ExclusiveLock()
 	{
-		m_mutex.unlock();
+		mutex.unlock();
 	}
 private:
-	std::shared_mutex& m_mutex;
+	std::shared_mutex& mutex;
 };
 
-std::unordered_set<std::string> black_list;
+std::unordered_set<std::string> filter_list;
 static bool filtering_enabled = false;
-static bool during_black_list_initialization = false;
+static bool during_filter_list_initialization = false;
 
 py::list get_stdlib_paths()
 {
@@ -109,13 +107,13 @@ py::list get_libraries_paths()
 // def set_filtering_mode(stdlib: bool, third_party: bool, user: bool) -> None: ...
 py::none set_filtering_mode(bool stdlib, bool third_party, bool user)
 {
-	black_list.clear();
+	filter_list.clear();
 
 	if (stdlib)
 	{
 		for (const auto& path : get_stdlib_paths())
 		{
-			black_list.insert(path.cast<std::string>());
+			filter_list.insert(path.cast<std::string>());
 		}
 	}
 
@@ -123,7 +121,7 @@ py::none set_filtering_mode(bool stdlib, bool third_party, bool user)
 	{
 		for (const auto& path : get_libraries_paths())
 		{
-			black_list.insert(path.cast<std::string>());
+			filter_list.insert(path.cast<std::string>());
 		}
 	}
 
@@ -147,7 +145,7 @@ static void initialize_filtering()
 	if (filtering_enabled)
 		return;
 
-	during_black_list_initialization = true;
+	during_filter_list_initialization = true;
 
 	set_filtering_mode(true, true, false);
 
@@ -157,11 +155,11 @@ static void initialize_filtering()
 	for (int i = 1; i < paths.size(); i++)
 	{
 		std::string path_string = paths[i].cast<std::string>();
-		black_list.insert(std::move(path_string));
+		filter_list.insert(std::move(path_string));
 	}
 
 	filtering_enabled = true;
-	during_black_list_initialization = false;
+	during_filter_list_initialization = false;
 }
 
 static std::vector<std::string> split_path(const std::string& path)
@@ -205,7 +203,7 @@ inline bool starts_with(const std::string_view& str, const std::string_view& pre
 
 bool path_in_excluded_folder(const std::string_view& path)
 {
-	for (const auto& filter_path : black_list)
+	for (const auto& filter_path : filter_list)
 	{
 		if (starts_with(path, filter_path))
 		{
@@ -256,7 +254,7 @@ static uint64_t get_source_index_from_frame(PyFrameObject* frame)
 	const char* func_name = PyUnicode_AsUTF8AndSize(code->co_name, &func_name_len);
 	int64_t line = code->co_firstlineno;
 
-	if (during_black_list_initialization)
+	if (during_filter_list_initialization)
 	{
 		return INVALID_SOURCE_INDEX;
 	}
@@ -495,7 +493,7 @@ py::list get_filtered_out_folders()
 {
 	py::list result;
 
-	for (const auto& path : black_list)
+	for (const auto& path : filter_list)
 	{
 		result.append(path);
 	}
@@ -515,11 +513,11 @@ py::none set_filtered_out_folders(py::list files)
 		}
 	}
 
-	black_list.clear();
+	filter_list.clear();
 
 	for (const auto& path : files)
 	{
-		black_list.insert(path.cast<std::string>());
+		filter_list.insert(path.cast<std::string>());
 	}
 
 	return py::none();
