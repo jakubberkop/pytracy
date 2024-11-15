@@ -296,9 +296,29 @@ static void initialize_filtering(PyTracyState& state)
 
 static void initialize_call_stack(PyFrameObject* frame, ThreadData* thread_data);
 
+static thread_local ThreadData* current_thread_data = nullptr;
+static ThreadData* get_current_thread_data(PyFrameObject* frame, bool& just_initialized);
+static ThreadData* get_current_thread_data_impl(PyFrameObject* frame, bool& just_initialized);
+
 static ThreadData* get_current_thread_data(PyFrameObject* frame, bool& just_initialized)
 {
 	ZoneScoped;
+
+	if(current_thread_data)
+	{
+		just_initialized = false;
+		assert(current_thread_data->thread_id == PyThread_get_thread_ident());
+		return current_thread_data;
+	}
+
+	current_thread_data = get_current_thread_data_impl(frame, just_initialized);
+	return current_thread_data;
+}
+
+static ThreadData* get_current_thread_data_impl(PyFrameObject* frame, bool& just_initialized)
+{
+	ZoneScoped;
+
 	assert(!PyGILState_Check());
 
 	uint64_t thread_id;
