@@ -1,6 +1,6 @@
 [project]
 name = "pytracy"
-version = "0.0.2"
+version = "0.0.2-rc"
 authors = [
   { name="Jakub Berkop", email="jakub.berkop@gmail.com" },
 ]
