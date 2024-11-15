@@ -320,8 +320,6 @@ static ThreadData* get_current_thread_data_impl(PyFrameObject* frame, bool& just
 {
 	ZoneScoped;
 
-	assert(!PyGILState_Check());
-
 	uint64_t thread_id;
 	
 	{
