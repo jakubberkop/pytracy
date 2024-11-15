@@ -39,9 +39,11 @@ pytracy.enable_tracing(True)
 ## Performance measurements
 `py .\utils\perf.py`
 
-Base				    		Average	80.00 ns	dev 45.87 ns
-python empty profile_function	Average 246.06 ns	dev 47.37 ns
-PyTracy Debug(19587f466)		Average 3390.63 ns	dev 375.23 ns
-PyTracy Release(19587f466)		Average 1441.24 ns	dev 66.48 ns
-PyTracy Release(c6c8c803e)		Average 950.58 ns	dev 113.11 ns
-PyTracy Release(a42aa86b5)		Average 760.63 ns	dev 49.53 ns
+| Test | Average | Std. Deviation |
+| - | - | - |
+| Base | 80.00 ns |45.87 ns
+| python empty profile_function| 246.06 ns |47.37 ns
+| PyTracy Debug(19587f466)| 3390.63 ns |375.23 ns
+| PyTracy Release(19587f466)| 1441.24 ns |66.48 ns
+| PyTracy Release(c6c8c803e)| 950.58 ns |113.11 ns
+| PyTracy Release(a42aa86b5)| 760.63 ns |49.53 ns
