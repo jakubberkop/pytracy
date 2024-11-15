@@ -541,7 +541,6 @@ int on_trace_event(PyObject* obj, PyFrameObject* frame, int what, PyObject *arg)
 		case PyTrace_RETURN:
 		{
 			ZoneScopedN("PyTrace_RETURN");
-			py::gil_scoped_release release;
 
 			bool _;
 			ThreadData* thread_data = get_current_thread_data(frame, _);
