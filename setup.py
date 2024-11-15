@@ -125,7 +125,7 @@ extension = Extension(
 )
 
 setup(name = 'pytracy',
-	version = '0.0.2-rc',
+	version = '0.0.2-rc2',
 	cmdclass={
 	'build_ext': CMakeBuildExt,
 	},
