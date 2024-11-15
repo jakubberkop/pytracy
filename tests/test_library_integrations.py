@@ -3,11 +3,11 @@ import pytracy
 
 class LibraryIntegrations(unittest.TestCase):
 	def setUp(self) -> None:
-		pytracy.set_tracing_mode(pytracy.TracingMode.All)
+		pytracy.enable_tracing(True)
 		return super().setUp()
 	
 	def tearDown(self) -> None:
-		pytracy.set_tracing_mode(pytracy.TracingMode.Disabled)
+		pytracy.enable_tracing(False)
 		return super().tearDown()
 
 	def test_numpy_integration(self):
