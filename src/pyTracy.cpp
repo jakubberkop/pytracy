@@ -96,7 +96,6 @@ py::object on_trace_event_wrapper(py::args args, py::kwargs kwargs);
 enum class TracingMode
 {
 	Disabled = 0,
-	MarkedFunctions = 1,
 	All = 2
 };
 
@@ -762,20 +761,24 @@ py::none set_filtered_out_folders(py::list files)
 	return py::none();
 }
 
+py::none enable_tracing(bool enable)
+{
+	ZoneScoped;
+
+	TracingMode mode = enable ? TracingMode::All : TracingMode::Disabled;
+	set_tracing_mode(static_cast<int>(mode));
+
+	return py::none();
+}
+
 PYBIND11_MODULE(pytracy, m) {
 	m.doc() = "Tracy Profiler bindings for Python";
-	m.def("set_tracing_mode", &set_tracing_mode, "Sets Tracy Profiler tracing mode");
+	m.def("enable_tracing", &enable_tracing, "Sets Tracy Profiler tracing mode");
 
 	m.def("set_filtered_out_folders", &set_filtered_out_folders, "Sets which folders should be ignored while profiling");
 	m.def("get_filtered_out_folders", &get_filtered_out_folders, "Returns a list of filtered out folders");
 
 	m.def("set_filtering_mode", &set_filtering_mode, "Sets the filtering mode for the profiler");
-
-	py::enum_<TracingMode>(m, "TracingMode")
-		.value("Disabled", TracingMode::Disabled)
-		.value("MarkedFunctions", TracingMode::MarkedFunctions)
-		.value("All", TracingMode::All)
-		.export_values();
 
 	// Initialize the state
 	PyTracyState& state = PyTracyState::the();

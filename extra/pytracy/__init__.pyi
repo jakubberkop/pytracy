@@ -9,23 +9,13 @@ This undesirable, so it is recommended to only import this module when you want 
 
 """
 from typing import List
-from enum import Enum
 
 """
-Specifies different tracing modes.
-- Disabled: No tracing is done.
-- All: All functions are traced. High overhead, comparable to running with debugger attached.
-"""
-class TracingMode(Enum):
-	Disabled = 0
-	All = 2
+Starts or stops tracing.
 
+:param enabled: Whether to enable or disable tracing.
 """
-Enables or disables tracing of function calls.
-:param mode: The tracing mode to set.
-
-"""
-def set_tracing_mode(mode: TracingMode) -> None: ...
+def enable_tracing(enabled: bool) -> None: ...
 
 """
 Sets which folders should be ignored when tracing.
