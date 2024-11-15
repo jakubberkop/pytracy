@@ -13,6 +13,8 @@
 
 // #define PYTRACY_DEBUG
 // #define PYTRACY_PROFILE
+// #define PYTRACY_DEBUG_ALLOW_ALL
+
 
 #ifdef PYTRACY_PROFILE
 
@@ -427,6 +429,10 @@ bool update_should_be_filtered_out(ProcessedFunctionData* data)
 {
 	ZoneScoped;
 
+#ifdef PYTRACY_DEBUG_ALLOW_ALL
+	return false;
+#endif
+
 	PyTracyState& state = PyTracyState::the();
 
 	if (data->is_filtered_out_dirty)
@@ -645,22 +651,20 @@ static void set_tracing_internal(PyTracyState& state)
 	if (state.tracing_mode == TracingMode::Disabled)
 	{
 		py::module threading_module = state.threading_module;
-		py::function settrace = threading_module.attr("settrace");
+		py::function setprofile = threading_module.attr("setprofile");
 
-		settrace(py::none());
-
-		PyEval_SetTrace(NULL, NULL);
+		setprofile(py::none());
+		PyEval_SetProfile(NULL, NULL);
 	}
 	else if (state.tracing_mode == TracingMode::All)
 	{
 		assert(PyGILState_Check());
 
 		py::module threading_module = state.threading_module;
-		py::function settrace = threading_module.attr("settrace");
-		
-		settrace(state.on_trace_event_wrapped);
+		py::function setprofile = threading_module.attr("setprofile");
 
-		PyEval_SetTrace(on_trace_event, NULL);
+		setprofile(state.on_trace_event_wrapped);
+		PyEval_SetProfile(on_trace_event, NULL);
 	}
 	else
 	{
