@@ -419,8 +419,17 @@ ProcessedFunctionData* get_function_data(PyCodeObject* code, PyFrameObject* fram
 	std::string full_qual_name;
 
 	py::handle f_back = py::handle((PyObject*)frame);
+	py::object module = py::none{};
 
-	py::object module = state.inspect_getmodule(f_back);
+	try
+	{
+		module = state.inspect_getmodule(f_back);
+	}
+	catch(...)
+	{
+		// At shutdown, getmodule can throw an exception
+		// Best course of action is to ignore it, since module name is not critical
+	}
 
 	if (module.is_none())
 	{
