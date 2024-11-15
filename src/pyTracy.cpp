@@ -177,11 +177,13 @@ bool PyTracyState::during_initialization = false;
 
 void _print_stack(ThreadData& thread, std::string operation, std::ostream& file)
 {
-	file << "T:" << thread.thread_id << " Q: " << thread.tracy_stack.size() << " " << operation << std::endl;
+	file << "T:" << thread.thread_id << " Q: " << thread.tracy_stack.size() << " " << operation << "\n";
 	for (auto& frame : thread.tracy_stack)
 	{
-		file << frame.func_data->full_qual_name << std::endl;
+		file << frame.func_data->full_qual_name << "\n";
 	}
+
+	file << std::flush;
 }
 
 void print_stack(ThreadData& thread, std::string operation)
