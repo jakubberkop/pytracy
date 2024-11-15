@@ -432,6 +432,8 @@ ProcessedFunctionData* get_function_data(PyCodeObject* code, PyFrameObject* fram
 		full_qual_name = module_name.cast<std::string>() + "." + std::string(qual_name, (size_t)qual_name_len);
 	}
 
+	full_qual_name = replace_all(full_qual_name, ".", "::");
+
 	py::gil_scoped_release release2;
 
 	std::string_view file_name_str(file_name, file_name_len);
