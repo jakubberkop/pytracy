@@ -61,7 +61,7 @@ namespace py = pybind11;
 
 struct ProcessedFunctionData
 {
-	int64_t line;
+	uint32_t line;
 
 	std::string file_name;
 	std::string func_name;
@@ -410,7 +410,7 @@ ProcessedFunctionData* get_function_data(PyCodeObject* code, PyFrameObject* fram
 	const char* func_name = PyUnicode_AsUTF8AndSize(code->co_name, &func_name_len);
 	const char* qual_name = PyUnicode_AsUTF8AndSize(code->co_qualname, &qual_name_len);
 
-	int64_t line = code->co_firstlineno;
+	uint32_t line = code->co_firstlineno;
 
 	assert(file_name != 0);
 	assert(func_name != 0);
