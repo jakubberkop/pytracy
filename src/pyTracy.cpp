@@ -91,7 +91,7 @@ struct ThreadData
 #endif
 };
 
-py::object on_trace_event_wrapper(py::args args, py::kwargs kwargs);
+PyObject* on_trace_event_wrapper_c(PyObject *self, PyObject *const *args, Py_ssize_t nargs);
 
 enum class TracingMode
 {
@@ -116,17 +116,14 @@ struct PyTracyState
 	robin_hood::unordered_map<PyCodeObject*, ProcessedFunctionData*> function_data;
 	TracySharedLockable(std::shared_mutex, function_data_mutex);
 
-	// Python interface
-	// TraceFunction: TypeAlias = Callable[[FrameType, str, Any], TraceFunction | None]
-	// def settrace(function: TraceFunction | None, /) -> None: ...
-	py::cpp_function on_trace_event_wrapped;
-
 	py::module os_module;
 	py::module sys_module;
 	py::module inspect_module;
 	py::module threading_module;
 	py::object inspect_currentframe;
 	py::object inspect_getmodule;
+
+	py::handle on_trace_event_wrapped;
 
 #ifdef PYTRACY_DEBUG
 	std::ofstream global_stack_file{"threads/global_stack.txt"};
@@ -163,7 +160,14 @@ struct PyTracyState
 		inspect_currentframe = inspect_module.attr("currentframe");
 		inspect_getmodule =  inspect_module.attr("getmodule");
 
-		on_trace_event_wrapped = py::cpp_function(on_trace_event_wrapper);
+		PyMethodDef* on_trace_event_wrapper_method = new PyMethodDef{
+			"on_trace_event_wrapper",
+			(PyCFunction)on_trace_event_wrapper_c,
+			METH_FASTCALL,
+			nullptr
+		};
+
+		on_trace_event_wrapped = py::handle(PyCFunction_New(on_trace_event_wrapper_method, nullptr));
 
 		initialize_filtering(*this);
 	}
@@ -587,6 +591,53 @@ int on_trace_event(PyObject* obj, PyFrameObject* frame, int what, PyObject *arg)
 	return 0;
 }
 
+// typedef PyObject *(*PyCFunction)(PyObject *, PyObject *);
+PyObject* on_trace_event_wrapper_c(PyObject *self, PyObject *const *args, Py_ssize_t nargs)
+{
+	ZoneScoped;
+	assert(self == nullptr);
+
+	PyFrameObject* frame = (PyFrameObject*)args[0];
+
+	std::optional<int> what = std::nullopt;
+
+	PyObject* what_obj = args[1];
+	assert(PyUnicode_Check(what_obj));
+
+	Py_ssize_t what_str_len;
+	const char* what_str = PyUnicode_AsUTF8AndSize(what_obj, &what_str_len);
+
+	if (std::strncmp(what_str, "call", what_str_len) == 0){
+		what = PyTrace_CALL;
+	} else if (std::strncmp(what_str, "return", what_str_len) == 0){
+		what = PyTrace_RETURN;
+	}
+	// We are purposefully not checking other events, as we are not interested in them
+
+	if (what.has_value())
+	{
+		on_trace_event(nullptr, frame, what.value(), nullptr);
+	}
+
+	PyTracyState& state = PyTracyState::the();
+	if (state.tracing_mode == TracingMode::All)
+	{
+		// on_trace_event_wrapper_c needs to return the next trace event function,
+		// which is on_trace_event_wrapper_c itself
+		return state.on_trace_event_wrapped.ptr();
+	}
+	else if (state.tracing_mode == TracingMode::Disabled)
+	{
+		// unless we are about to change the mode, which means that we need to return None
+		Py_RETURN_NONE;
+	}
+	else
+	{
+		// Should not be reached
+		assert(false);
+		Py_RETURN_NONE;
+	}
+}
 
 static void initialize_call_stack(PyFrameObject* frame, ThreadData* thread_data)
 {
@@ -629,49 +680,6 @@ static void initialize_call_stack(PyFrameObject* frame, ThreadData* thread_data)
 #endif
 }
 
-py::object on_trace_event_wrapper(py::args args, py::kwargs kwargs)
-{
-	ZoneScoped;
-
-	py::object frame_object = args[0].cast<py::object>();
-	PyFrameObject* frame = reinterpret_cast<PyFrameObject*>(frame_object.ptr());
-
-	std::string what_str = args[1].cast<std::string>();
-
-	std::optional<int> what = std::nullopt;
-
-	if (what_str == "call") {
-		what = PyTrace_CALL;
-	} else if (what_str == "return") {
-		what = PyTrace_RETURN;
-	}
-	// We are purposefully not checking other events, as we are not interested in them
-
-	if (what.has_value())
-	{
-		on_trace_event(nullptr, frame, what.value(), nullptr);
-	}
-
-	PyTracyState& state = PyTracyState::the();
-	if (state.tracing_mode == TracingMode::All)
-	{
-		// on_trace_event_wrapper needs to return the next trace event function,
-		// which is on_trace_event_wrapper itself
-		return state.on_trace_event_wrapped;
-	}
-	else if (state.tracing_mode == TracingMode::Disabled)
-	{
-		// unless we are about to change the mode, which means that we need to return None
-		return py::none();
-	}
-	else
-	{
-		// Should not be reached
-		assert(false);
-		return py::none();
-	}
-}
-
 static void set_tracing_internal(PyTracyState& state)
 {
 	ZoneScoped;
@@ -687,12 +695,12 @@ static void set_tracing_internal(PyTracyState& state)
 	}
 	else if (state.tracing_mode == TracingMode::All)
 	{
-		assert(PyGILState_Check());
+		assert(PYTRACY_PyGILState_Check());
 
 		py::module threading_module = state.threading_module;
 		py::function setprofile = threading_module.attr("setprofile");
 
-		setprofile(state.on_trace_event_wrapped);
+		PyObject_CallFunctionObjArgs(setprofile.ptr(), state.on_trace_event_wrapped, NULL);
 		PyEval_SetProfile(on_trace_event, NULL);
 	}
 	else
