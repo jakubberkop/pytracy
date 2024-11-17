@@ -2,14 +2,16 @@ import glob
 import os
 import shutil
 import sys
+import sysconfig
 
+from pathlib import Path
 from setuptools import setup, Extension
 from setuptools.command.build_ext import build_ext
 from setuptools.command.install import install
 from subprocess import check_call, run
-from pathlib import Path
 
 debug = False
+# debug = True
 
 class CMakeBuildExt(build_ext):
 	def run(self):
@@ -96,19 +98,22 @@ else:
 	extra_compile_args = ["-std=c++17"]
 	extra_link_args = ["-Wno-undef", "-ldl", "-lm"]
 
-# if debug:
-# 	if os.name == "nt":
-# 		extra_compile_args.extend(["/Od", "/Zi", "/DEBUG", "/Yd"])
-# 		extra_link_args.extend(["/DEBUG", "/Zi"])
-# 	# Linux 
-# 	elif os.name == "posix":
-# 		extra_compile_args.extend(["-O0", "-g3"])
-# 		extra_link_args.extend(["-O0", "-g3"])
+if sysconfig.get_config_var('Py_GIL_DISABLED'):
+	extra_compile_args.append('-DPy_GIL_DISABLED=1')
 
-# 		extra_compile_args.extend(["-fsanitize=address", "-fsanitize=undefined"])
-# 		extra_link_args.extend(["-fsanitize=address", "-fsanitize=undefined"])
-# 	else:
-# 		raise Exception("Unsupported OS")
+if debug:
+	if os.name == "nt":
+		extra_compile_args.extend(["/Od", "/Zi", "/DEBUG", "/Yd"])
+		extra_link_args.extend(["/DEBUG", "/Zi"])
+	# Linux rm
+	elif os.name == "posix":
+		extra_compile_args.extend(["-O0", "-g3"])
+		extra_link_args.extend(["-O0", "-g3"])
+
+		extra_compile_args.extend(["-fsanitize=address", "-fsanitize=undefined"])
+		extra_link_args.extend(["-fsanitize=address", "-fsanitize=undefined"])
+	else:
+		raise Exception("Unsupported OS")
 
 # Define the custom extension module
 extension = Extension(

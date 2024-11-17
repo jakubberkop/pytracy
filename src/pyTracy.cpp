@@ -782,7 +782,7 @@ py::none enable_tracing(bool enable)
 	return py::none();
 }
 
-PYBIND11_MODULE(pytracy, m) {
+PYBIND11_MODULE(pytracy, m, py::mod_gil_not_used()) {
 	m.doc() = "Tracy Profiler bindings for Python";
 	m.def("enable_tracing", &enable_tracing, "Sets Tracy Profiler tracing mode");
 
