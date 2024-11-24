@@ -15,10 +15,6 @@
 // #define PYTRACY_PROFILE
 // #define PYTRACY_DEBUG_ALLOW_ALL
 
-// #define PYTRACY_FILTERING_OLD
-// #define PYTRACY_FILTERING_ATOMIC
-// #define PYTRACY_FILTERING_GENERATIONS
-// #define PYTRACY_DEDUPLICATE_FUNCTION_DATA_CREATION
 // #define PYTRACY_CONSTANT_FUNCTION_DATA
 
 #ifdef PYTRACY_PROFILE
@@ -76,9 +72,7 @@ namespace py = pybind11;
 
 struct ProcessedFunctionData
 {
-#ifdef PYTRACY_DEDUPLICATE_FUNCTION_DATA_CREATION
 	std::atomic_flag during_initialization;
-#endif
 
 #ifdef PYTRACY_CONSTANT_FUNCTION_DATA
 	tracy::SourceLocationData tracy_source_location;
@@ -92,19 +86,8 @@ struct ProcessedFunctionData
 
 	// Caches the results of filtering, so that it doesn't have to be checked on every call
 	// It needs to be recalculated when the filtering mode changes (is_filtered_out_dirty == true)
-
-#ifdef PYTRACY_FILTERING_OLD
-	bool is_filtered_out_internal;
-	bool is_filtered_out_dirty;
-#endif
-#ifdef PYTRACY_FILTERING_ATOMIC
 	std::atomic<bool> is_filtered_out_internal;
 	std::atomic<bool> is_filtered_out_dirty;
-#endif
-#ifdef PYTRACY_FILTERING_GENERATIONS
-	std::atomic<bool> is_filtered_out_internal;
-	std::atomic<uint64_t> generation;
-#endif
 };
 
 struct PyTracyStackFrame
@@ -138,10 +121,6 @@ static void initialize_filtering(PyTracyState& state);
 
 struct PyTracyState
 {
-#ifdef PYTRACY_FILTERING_GENERATIONS
-	std::atomic<uint64_t> generation = 0;
-#endif
-
 	TracingMode tracing_mode = TracingMode::Disabled;
 
 	// Filtering
@@ -291,20 +270,12 @@ void mark_function_is_filtered_out_dirty(PyTracyState& state)
 {
 	ZoneScoped;
 
-#ifdef PYTRACY_FILTERING_GENERATIONS
-	state.generation++;
-#else
 	py::gil_scoped_release release;
-
-#ifdef PYTRACY_FILTERING_OLD
-	ExclusiveLock lock(state.function_data_mutex);
-#endif
 
 	for (auto& [_, data] : state.function_data)
 	{
 		data->is_filtered_out_dirty = true;
 	}
-#endif
 }
 
 void internal_set_filtering_mode(bool stdlib, bool third_party, bool user, PyTracyState& state)
@@ -433,8 +404,6 @@ ProcessedFunctionData* get_function_data(PyCodeObject* code, PyFrameObject* fram
 
 	ProcessedFunctionData* data = nullptr;
 
-#ifdef PYTRACY_DEDUPLICATE_FUNCTION_DATA_CREATION
-
 	{
 		state.function_data_mutex.lock_shared();
 		auto it = state.function_data.find(code);
@@ -445,7 +414,8 @@ ProcessedFunctionData* get_function_data(PyCodeObject* code, PyFrameObject* fram
 		{
 			data = it->second;
 
-			// Wait until the data is initialized
+			// Another thread might be already initializing the data
+			// Wait until it's done
 			ZoneScopedN("wait_for_initialization");
 			while (data->during_initialization.test())
 			{
@@ -458,25 +428,13 @@ ProcessedFunctionData* get_function_data(PyCodeObject* code, PyFrameObject* fram
 
 	{
 		ExclusiveLock lock(state.function_data_mutex);
-
 		data = new ProcessedFunctionData{};
+
+		// This thread is the first to initialize the data
+		// Set the flag to prevent other threads from initializing it
 		assert(!data->during_initialization.test_and_set());
 		state.function_data[code] = data;
 	}
-
-#else
-	{
-		SharedLock lock(state.function_data_mutex);
-
-		auto it = state.function_data.find(code);
-		if (it != state.function_data.end())
-		{
-			return it->second;
-		}
-	}
-
-	ExclusiveLock lock(state.function_data_mutex);
-#endif
 
 	// TODO(Performance): Is this required?
 	py::gil_scoped_acquire acquire;
@@ -534,27 +492,13 @@ ProcessedFunctionData* get_function_data(PyCodeObject* code, PyFrameObject* fram
 	std::string_view file_name_str(file_name, file_name_len);
 	bool is_filtered_out = !is_path_acceptable(file_name_str, state.filter_list);
 
-#ifndef PYTRACY_DEDUPLICATE_FUNCTION_DATA_CREATION
-	data = new ProcessedFunctionData{};
-#endif
-
 	// This purposefully leaks memory, as it has to be kept alive for the entire program lifetime
 	data->line = line;
 	data->file_name = file_name;
 	data->func_name = func_name;
 	data->full_qual_name = full_qual_name;
 	data->is_filtered_out_internal = is_filtered_out;
-
-#ifdef PYTRACY_FILTERING_GENERATIONS
-	data->generation = state.generation.load();
-#else
 	data->is_filtered_out_dirty = false;
-#endif
-
-#ifdef PYTRACY_DEDUPLICATE_FUNCTION_DATA_CREATION
-	data->during_initialization.clear();
-	data->during_initialization.notify_all();
-#endif
 
 #ifdef PYTRACY_CONSTANT_FUNCTION_DATA
 	data->tracy_source_location = tracy::SourceLocationData{
@@ -579,35 +523,11 @@ bool update_should_be_filtered_out(ProcessedFunctionData* data)
 
 	PyTracyState& state = PyTracyState::the();
 
-#ifdef PYTRACY_FILTERING_OLD
-	if (data->is_filtered_out_dirty)
-	{
-		// TODO: Performance. We don't have to capture whole function_data_mutex
-		ExclusiveLock lock(state.function_data_mutex);
-
-		data->is_filtered_out_internal = !is_path_acceptable(data->file_name, state.filter_list);
-		data->is_filtered_out_dirty = false;
-	}
-
-#endif
-
-#ifdef PYTRACY_FILTERING_ATOMIC
-
 	if (data->is_filtered_out_dirty.load())
 	{
 		data->is_filtered_out_internal = !is_path_acceptable(data->file_name, state.filter_list);
 		data->is_filtered_out_dirty.store(false);
 	}
-#endif
-
-#ifdef PYTRACY_FILTERING_GENERATIONS
-	uint64_t generation = state.generation.load();
-	if (data->generation.load() != generation)
-	{
-		data->is_filtered_out_internal = !is_path_acceptable(data->file_name, state.filter_list);
-		data->generation.store(generation);
-	}
-#endif
 
 	return data->is_filtered_out_internal;
 }
