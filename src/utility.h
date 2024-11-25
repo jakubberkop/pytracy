@@ -34,26 +34,6 @@ private:
 	SharedLockableBase(std::shared_mutex)& mutex;
 };
 
-
-static std::vector<std::string> split_path(const std::string& path)
-{
-	std::vector<std::string> result;
-
-	size_t start = 0;
-	size_t end = path.find('\\');
-
-	while (end != std::string::npos)
-	{
-		result.push_back(path.substr(start, end - start));
-		start = end + 1;
-		end = path.find('\\', start);
-	}
-
-	result.push_back(path.substr(start, end));
-
-	return result;
-}
-
 inline bool starts_with(const std::string_view& str, const std::string_view& prefix)
 {
 	const size_t prefix_size = prefix.size();
