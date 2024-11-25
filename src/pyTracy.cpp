@@ -15,11 +15,11 @@
 // #define PYTRACY_PROFILE
 // #define PYTRACY_DEBUG_ALLOW_ALL
 
-// #define PYTRACY_CONSTANT_FUNCTION_DATA
+typedef ___tracy_source_location_data TracySourceLocationData;
 
 #ifdef PYTRACY_PROFILE
 
-TracyCZoneCtx pytracy_zone_start(uint64_t srcloc, int active)
+TracyCZoneCtx pytracy_zone_start(TracySourceLocationData* srcloc, int active)
 {
 	return{};
 }
@@ -40,21 +40,10 @@ void pytracy_zone_end(TracyCZoneCtx ctx)
 #undef SharedLockableBase
 #define SharedLockableBase(type) type
 
-#ifdef PYTRACY_CONSTANT_FUNCTION_DATA
-
-TracyCZoneCtx pytracy_zone_start(uint64_t srcloc, int active)
+TracyCZoneCtx pytracy_zone_start(TracySourceLocationData* srcloc, int active)
 {
-	return ___tracy_emit_zone_begin((const struct ___tracy_source_location_data*)srcloc, active);
+	return ___tracy_emit_zone_begin(srcloc, active);
 }
-
-#else
-
-TracyCZoneCtx pytracy_zone_start(uint64_t srcloc, int active)
-{
-	return ___tracy_emit_zone_begin_alloc(srcloc, active);
-}
-
-#endif
 
 void pytracy_zone_end(TracyCZoneCtx ctx)
 {
@@ -74,12 +63,9 @@ struct ProcessedFunctionData
 {
 	std::atomic_flag during_initialization;
 
-#ifdef PYTRACY_CONSTANT_FUNCTION_DATA
-	tracy::SourceLocationData tracy_source_location;
-#endif
+	TracySourceLocationData tracy_source_location;
 
 	uint32_t line;
-
 	std::string file_name;
 	std::string func_name;
 	std::string full_qual_name;
@@ -94,7 +80,9 @@ struct PyTracyStackFrame
 {
 	TracyCZoneCtx tracyCtx;
 	bool is_active;
+#ifdef PYTRACY_DEBUG
 	ProcessedFunctionData* func_data;
+#endif
 };
 
 struct ThreadData
@@ -103,7 +91,7 @@ struct ThreadData
 	uint64_t thread_id;
 
 #ifdef PYTRACY_DEBUG
-	bool is_on_event = false;
+	bool is_during_event = false;
 	std::ofstream file;
 #endif
 };
@@ -249,7 +237,7 @@ py::list internal_get_libraries_paths(PyTracyState& state)
 	py::list stdlib_paths = internal_get_stdlib_paths(state);
 	py::list result;
 
-	for (int i = 1; i < paths.size(); i++)
+	for (size_t i = 1; i < paths.size(); i++)
 	{
 		if (stdlib_paths.contains(paths[i]))
 			continue;
@@ -394,7 +382,7 @@ namespace std
 	};
 }
 
-ProcessedFunctionData* get_function_data(PyCodeObject* code, PyFrameObject* frame)
+ProcessedFunctionData* get_function_data(PyFrameObject* frame)
 {
 	ZoneScoped;
 
@@ -403,6 +391,7 @@ ProcessedFunctionData* get_function_data(PyCodeObject* code, PyFrameObject* fram
 	PyTracyState& state = PyTracyState::the();
 
 	ProcessedFunctionData* data = nullptr;
+	PyCodeObject* code = PyFrame_GetCode(frame);
 
 	{
 		state.function_data_mutex.lock_shared();
@@ -500,15 +489,16 @@ ProcessedFunctionData* get_function_data(PyCodeObject* code, PyFrameObject* fram
 	data->is_filtered_out_internal = is_filtered_out;
 	data->is_filtered_out_dirty = false;
 
-#ifdef PYTRACY_CONSTANT_FUNCTION_DATA
-	data->tracy_source_location = tracy::SourceLocationData{
+	data->tracy_source_location = TracySourceLocationData{
 		.name = data->func_name.c_str(),
 		.function = data->full_qual_name.c_str(),
 		.file = data->file_name.c_str(),
 		.line = data->line,
 		.color = 0
 	};
-#endif
+
+	data->during_initialization.clear();
+	data->during_initialization.notify_all();
 
 	return data;
 }
@@ -532,27 +522,14 @@ bool update_should_be_filtered_out(ProcessedFunctionData* data)
 	return data->is_filtered_out_internal;
 }
 
-static uint64_t get_source_index_from_frame(PyFrameObject* frame, PyCodeObject* code, bool& is_active)
+static TracySourceLocationData* get_source_index_from_frame(PyFrameObject* frame, bool& is_active)
 {
 	ZoneScoped;
 	assert(!PyGILState_Check());
 
-	ProcessedFunctionData* data = get_function_data(code, frame);
-
+	ProcessedFunctionData* data = get_function_data(frame);
 	is_active = !update_should_be_filtered_out(data);
-
-#ifdef PYTRACY_CONSTANT_FUNCTION_DATA
-	return (uint64_t)&data->tracy_source_location;
-#else
-	uint64_t source_index = ___tracy_alloc_srcloc(
-		data->line,
-		data->file_name.c_str(), data->file_name.size(),
-		data->full_qual_name.c_str(), data->full_qual_name.size(),
-		0
-	);
-
-	return source_index;
-#endif
+	return &data->tracy_source_location;
 }
 
 int on_trace_event(PyObject* obj, PyFrameObject* frame, int what, PyObject *arg)
@@ -565,9 +542,7 @@ int on_trace_event(PyObject* obj, PyFrameObject* frame, int what, PyObject *arg)
 		case PyTrace_CALL:
 		{
 			ZoneScopedN("PyTrace_CALL");
-			// Return value: New reference.
-			// Return a strong reference.
-			PyCodeObject* code = PyFrame_GetCode(frame);
+
 			assert(code);
 
 			py::gil_scoped_release release;
@@ -576,14 +551,18 @@ int on_trace_event(PyObject* obj, PyFrameObject* frame, int what, PyObject *arg)
 			ThreadData* thread_data = get_current_thread_data(frame, just_initialized);
 
 			bool is_active = false;
-			uint64_t source_index = get_source_index_from_frame(frame, code, is_active);
+			TracySourceLocationData* source_index = get_source_index_from_frame(frame, is_active);
 
 			ProcessedFunctionData* data = nullptr;
 
 #ifdef PYTRACY_DEBUG
-			assert(!thread_data->is_on_event);
-			thread_data->is_on_event = true;
+			// Return value: New reference.
+			// Return a strong reference.
+			PyCodeObject* code = PyFrame_GetCode(frame);
+			assert(!thread_data->is_during_event);
+			thread_data->is_during_event = true;
 			data = get_function_data(code, frame);
+			Py_DECREF(code);
 #endif
 
 			// If we are just initializing the stack, we don't want to push the current frame.
@@ -591,16 +570,18 @@ int on_trace_event(PyObject* obj, PyFrameObject* frame, int what, PyObject *arg)
 			if (!just_initialized)
 			{
 				TracyCZoneCtx ctx = pytracy_zone_start(source_index, is_active);
+#ifdef PYTRACY_DEBUG
 				thread_data->tracy_stack.push_back({ctx, is_active, data});
+#else
+				thread_data->tracy_stack.push_back({ctx, is_active});
+#endif
 			}
 
-
 #ifdef PYTRACY_DEBUG
-			thread_data->is_on_event = false;
+			thread_data->is_during_event = false;
 			print_stack(*thread_data, "After push");
 #endif
 
-			Py_DECREF(code);
 			break;
 		}
 		case PyTrace_EXCEPTION:
@@ -615,8 +596,8 @@ int on_trace_event(PyObject* obj, PyFrameObject* frame, int what, PyObject *arg)
 			ThreadData* thread_data = get_current_thread_data(frame, _);
 
 #ifdef PYTRACY_DEBUG
-			assert(!thread_data->is_on_event);
-			thread_data->is_on_event = true;
+			assert(!thread_data->is_during_event);
+			thread_data->is_during_event = true;
 			print_stack(*thread_data, "Befor pop");
 #endif
 
@@ -628,7 +609,7 @@ int on_trace_event(PyObject* obj, PyFrameObject* frame, int what, PyObject *arg)
 
 #ifdef PYTRACY_DEBUG
 			print_stack(*thread_data, "After pop");
-			thread_data->is_on_event = false;
+			thread_data->is_during_event = false;
 #endif
 
 			break;
@@ -720,16 +701,14 @@ static void initialize_call_stack(PyFrameObject* frame, ThreadData* thread_data)
 		Py_DECREF(back);
 	}
 
-	PyCodeObject* code = PyFrame_GetCode(frame);
-
 	bool is_active = false;
-	uint64_t source_index;
-	ProcessedFunctionData* data; 
+	TracySourceLocationData* source_index;
+	ProcessedFunctionData* data;
 
 	{
 		py::gil_scoped_release release;
-		source_index = get_source_index_from_frame(frame, code, is_active);
-		data = get_function_data(code, frame);
+		source_index = get_source_index_from_frame(frame, is_active);
+		data = get_function_data(frame);
 	}
 
 #ifdef PYTRACY_DEBUG
@@ -737,10 +716,12 @@ static void initialize_call_stack(PyFrameObject* frame, ThreadData* thread_data)
 #endif
 
 	TracyCZoneCtx ctx = pytracy_zone_start(source_index, is_active);
-	thread_data->tracy_stack.push_back({ctx, is_active, data});
 
 #ifdef PYTRACY_DEBUG
+	thread_data->tracy_stack.push_back({ctx, is_active, data});
 	print_stack(*thread_data, "After push");
+#else
+	thread_data->tracy_stack.push_back({ctx, is_active});
 #endif
 }
 
