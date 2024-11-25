@@ -34,6 +34,7 @@ pytracy.enable_tracing(True)
 - No visibility into functions run using multiprocessing.
 
 ## Goals for 0.3.0 release
+- Mac support
 - Shutdown and startup during program execution
 - Changing of the tracing mode during runtime
 - Easy integration with python logging
