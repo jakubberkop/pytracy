@@ -1,5 +1,13 @@
 # pytracy
 
+PyTracy is a python package that allows you to profile your python code using the Tracy profiler. It is a wrapper around the Tracy profiler, which is a real-time, nanosecond resolution, remote telemetry, hybrid frame and sampling profiler for games and other applications. PyTracy allows you to profile your python code with minimal overhead and visualize the results in the Tracy profiler.
+
+## Features
+- Real-time, nanosecond resolution, remote telemetry, hybrid frame and sampling profiler
+- Minimal overhead
+- Easy integration with python code
+- Support for free threaded python
+
 ## Installation 
 
 Download the pytracy package using the following command:
@@ -7,10 +15,9 @@ Download the pytracy package using the following command:
 
 To connect to a profiled application, you will need the Tracy profiler. Follow the steps below:
 
-Download Tracy profiler from [Tracy Github](https://github.com/wolfpld/tracy/releases/tag/v0.10). 
+Download Tracy profiler from [Tracy Github](https://github.com/wolfpld/tracy/releases/tag/v0.11.1). 
 - For Windows, an executable is provided by the author.
-- For Linux, you need to build it from the source (refer to the documentation for build instructions).
-- Use the provided script for Ubuntu to install dependencies and build the Tracy Profiler - scripts\build_tracy_ubuntu.sh TODO: Should this be included?
+- For Linux, you need to build it from the source (refer to Tracy documentation for build instructions).
 
 ## Usage
 1. Enable the profiler
@@ -27,7 +34,6 @@ pytracy.enable_tracing(True)
 - No visibility into functions run using multiprocessing.
 
 ## Goals for 0.3.0 release
-- Support freethreaded 3.13+ python versions.
 - Shutdown and startup during program execution
 - Changing of the tracing mode during runtime
 - Easy integration with python logging
