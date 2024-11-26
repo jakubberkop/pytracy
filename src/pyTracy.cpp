@@ -4,6 +4,7 @@
 
 #include <mutex>
 #include <shared_mutex>
+#include <condition_variable>
 #include <deque>
 #include <string_view>
 #include <fstream>
@@ -61,7 +62,13 @@ namespace py = pybind11;
 
 struct ProcessedFunctionData
 {
+#ifdef __cpp_lib_atomic_wait
 	std::atomic_flag during_initialization;
+#else
+	std::atomic<bool> during_initialization;
+	std::mutex during_initialization_mtx;
+	std::condition_variable during_initialization_cv;
+#endif
 
 	TracySourceLocationData tracy_source_location;
 
@@ -406,11 +413,16 @@ ProcessedFunctionData* get_function_data(PyFrameObject* frame)
 			// Another thread might be already initializing the data
 			// Wait until it's done
 			ZoneScopedN("wait_for_initialization");
+
+#ifdef __cpp_lib_atomic_wait
 			while (data->during_initialization.test())
 			{
 				data->during_initialization.wait(true);
 			}
-
+#else
+			std::unique_lock lock(data->during_initialization_mtx);
+			data->during_initialization_cv.wait(lock, [&data] { return !data->during_initialization; });
+#endif
 			return data;
 		}
 	}
@@ -497,8 +509,16 @@ ProcessedFunctionData* get_function_data(PyFrameObject* frame)
 		.color = 0
 	};
 
+#ifdef __cpp_lib_atomic_wait
 	data->during_initialization.clear();
 	data->during_initialization.notify_all();
+#else
+	{
+		std::lock_guard lock(data->during_initialization_mtx);
+		data->during_initialization = false;
+		data->during_initialization_cv.notify_all();
+	}
+#endif
 
 	return data;
 }
