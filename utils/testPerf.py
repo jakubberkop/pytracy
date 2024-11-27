@@ -2,8 +2,14 @@ import time
 import os
 import threading
 
-import pytracy
-pytracy.enable_tracing(True)
+if False:
+    import pytracy
+    pytracy.enable_tracing(True)
+else:
+    import sys
+    def traceit(frame, event, arg):
+        return traceit
+    sys.setprofile(traceit)
 
 
 def a(i):
@@ -22,11 +28,7 @@ def func():
     for i in range(iteration_count):
         a(10)
 
-end = time.time()
-end = time.time()
-
     end = time.time()
-
     print(end - start)
 
 if ON_THREAD:
