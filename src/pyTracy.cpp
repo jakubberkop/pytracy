@@ -114,6 +114,98 @@ enum class TracingMode
 struct PyTracyState;
 static void initialize_filtering(PyTracyState& state);
 
+int on_trace_event(PyObject* obj, PyFrameObject* frame, int what, PyObject *arg);
+
+static ThreadData* get_current_thread_data(PyFrameObject* frame, bool& just_initialized);
+static ThreadData* get_current_thread_data_impl(PyFrameObject* frame, bool& just_initialized);
+static TracySourceLocationData* get_source_index_from_frame(PyCodeObject* code, bool& is_active);
+
+// void on_call(py::object code, int instruction_offset) {
+PyObject* on_call_c(PyObject *self, PyObject *const *args, Py_ssize_t nargs)
+{
+	// return;
+	// printf("call \n");
+	// PyFrameObject* frame = PyEval_GetFrame();
+	PyFrameObject* frame = nullptr;
+	PyCodeObject* code = (PyCodeObject*)args[0];
+
+	// py::gil_scoped_release release;
+
+	bool just_initialized;
+	ThreadData* thread_data = get_current_thread_data(frame, just_initialized);
+
+	bool is_active = false;
+	TracySourceLocationData* source_index = get_source_index_from_frame(code, is_active);
+
+#ifdef PYTRACY_DEBUG
+	ProcessedFunctionData* data = nullptr;
+	// Return value: New reference.
+	// Return a strong reference.
+	PyCodeObject* code = PyFrame_GetCode(frame);
+	assert(!thread_data->is_during_event);
+	thread_data->is_during_event = true;
+	data = get_function_data(code, frame);
+	Py_DECREF(code);
+#endif
+
+	// If we are just initializing the stack, we don't want to push the current frame.
+	// This leads to a duplicate entry in the stack
+	if (!just_initialized)
+	{
+		TracyCZoneCtx ctx = pytracy_zone_start(source_index, is_active);
+#ifdef PYTRACY_DEBUG
+		thread_data->tracy_stack.push_back({ctx, is_active, data});
+#else
+		thread_data->tracy_stack.push_back({ctx, is_active});
+#endif
+	}
+
+#ifdef PYTRACY_DEBUG
+	thread_data->is_during_event = false;
+	print_stack(*thread_data, "After push");
+#endif
+
+	// Py_DECREF(frame);
+
+	Py_INCREF(Py_None);
+	Py_RETURN_NONE;
+}
+
+// void on_return(py::object code, int instruction_offset, py::object retval) {
+PyObject* on_return_c(PyObject *self, PyObject *const *args, Py_ssize_t nargs)
+{
+	// return;
+	// printf("return \n");
+	// PyFrameObject* frame = PyEval_GetFrame();
+	PyFrameObject* frame = nullptr;
+    // on_trace_event(nullptr, frame, PyTrace_RETURN, nullptr);
+	// Py_DECREF(frame);
+    // on_trace_event(nullptr, (PyFrameObject*)frame.ptr(), PyTrace_RETURN, nullptr);
+
+	bool _;
+	ThreadData* thread_data = get_current_thread_data(frame, _);
+
+#ifdef PYTRACY_DEBUG
+	assert(!thread_data->is_during_event);
+	thread_data->is_during_event = true;
+	print_stack(*thread_data, "Befor pop");
+#endif
+
+	assert(thread_data->tracy_stack.size());
+
+	const auto stack_data = thread_data->tracy_stack.back();
+	thread_data->tracy_stack.pop_back();
+	pytracy_zone_end(stack_data.tracyCtx);
+
+#ifdef PYTRACY_DEBUG
+	print_stack(*thread_data, "After pop");
+	thread_data->is_during_event = false;
+#endif
+
+	Py_INCREF(Py_None);
+	Py_RETURN_NONE;
+}
+
 struct PyTracyState
 {
 	TracingMode tracing_mode = TracingMode::Disabled;
@@ -136,6 +228,8 @@ struct PyTracyState
 	py::object inspect_getmodule;
 
 	py::handle on_trace_event_wrapped;
+	py::handle on_call_wrapped;
+	py::handle on_return_wrapped;
 
 #ifdef PYTRACY_DEBUG
 	std::ofstream global_stack_file{"global_stack.txt"};
@@ -179,8 +273,24 @@ struct PyTracyState
 			nullptr
 		};
 
-		on_trace_event_wrapped = py::handle(PyCFunction_New(on_trace_event_wrapper_method, nullptr));
-		on_trace_event_wrapped.inc_ref();
+		PyMethodDef* on_call_wrapper_method = new PyMethodDef{
+			"on_call_wrapper",
+			(PyCFunction)on_call_c,
+			METH_FASTCALL,
+			nullptr
+		};
+
+		PyMethodDef* on_return_wrapper_method = new PyMethodDef{
+			"on_return_wrapper",
+			(PyCFunction)on_return_c,
+			METH_FASTCALL,
+			nullptr
+		};
+		on_call_wrapped = py::handle(PyCFunction_New(on_call_wrapper_method, nullptr));
+		on_call_wrapped.inc_ref();
+
+		on_return_wrapped = py::handle(PyCFunction_New(on_return_wrapper_method, nullptr));
+		on_return_wrapped.inc_ref();
 
 		initialize_filtering(*this);
 	}
@@ -369,6 +479,7 @@ static ThreadData* get_current_thread_data_impl(PyFrameObject* frame, bool& just
 	assert(thread_data);
 	{
 		py::gil_scoped_acquire acquire;
+		PyFrameObject* frame = PyEval_GetFrame();
 		initialize_call_stack(frame, thread_data);
 	}
 
@@ -389,7 +500,7 @@ namespace std
 	};
 }
 
-ProcessedFunctionData* get_function_data(PyFrameObject* frame)
+ProcessedFunctionData* get_function_data(PyCodeObject* code)
 {
 	ZoneScoped;
 
@@ -398,7 +509,7 @@ ProcessedFunctionData* get_function_data(PyFrameObject* frame)
 	PyTracyState& state = PyTracyState::the();
 
 	ProcessedFunctionData* data = nullptr;
-	PyCodeObject* code = PyFrame_GetCode(frame);
+	// PyCodeObject* code = PyFrame_GetCode(frame);
 
 	{
 		state.function_data_mutex.lock_shared();
@@ -461,7 +572,7 @@ ProcessedFunctionData* get_function_data(PyFrameObject* frame)
 	assert(qual_name != 0);
 
 	std::string full_qual_name;
-
+	PyFrameObject* frame = PyEval_GetFrame();
 	py::handle f_back = py::handle((PyObject*)frame);
 	py::object module = py::none{};
 
@@ -542,12 +653,12 @@ bool update_should_be_filtered_out(ProcessedFunctionData* data)
 	return data->is_filtered_out_internal;
 }
 
-static TracySourceLocationData* get_source_index_from_frame(PyFrameObject* frame, bool& is_active)
+static TracySourceLocationData* get_source_index_from_frame(PyCodeObject* code, bool& is_active)
 {
 	ZoneScoped;
 	assert(!PyGILState_Check());
 
-	ProcessedFunctionData* data = get_function_data(frame);
+	ProcessedFunctionData* data = get_function_data(code);
 	is_active = !update_should_be_filtered_out(data);
 	return &data->tracy_source_location;
 }
@@ -571,11 +682,10 @@ int on_trace_event(PyObject* obj, PyFrameObject* frame, int what, PyObject *arg)
 			ThreadData* thread_data = get_current_thread_data(frame, just_initialized);
 
 			bool is_active = false;
-			TracySourceLocationData* source_index = get_source_index_from_frame(frame, is_active);
-
-			ProcessedFunctionData* data = nullptr;
+			TracySourceLocationData* source_index = get_source_index_from_frame((PyCodeObject *)arg, is_active);
 
 #ifdef PYTRACY_DEBUG
+			ProcessedFunctionData* data = nullptr;
 			// Return value: New reference.
 			// Return a strong reference.
 			PyCodeObject* code = PyFrame_GetCode(frame);
@@ -674,7 +784,7 @@ PyObject* on_trace_event_wrapper_c(PyObject *self, PyObject *const *args, Py_ssi
 	{
 		try
 		{
-			on_trace_event(nullptr, frame, what.value(), nullptr);
+			// on_trace_event(nullptr, frame, what.value(), nullptr);
 		}
 		catch(const std::exception& e)
 		{
@@ -727,8 +837,9 @@ static void initialize_call_stack(PyFrameObject* frame, ThreadData* thread_data)
 
 	{
 		py::gil_scoped_release release;
-		source_index = get_source_index_from_frame(frame, is_active);
-		data = get_function_data(frame);
+		auto* code = PyFrame_GetCode(frame);
+		source_index = get_source_index_from_frame(code, is_active);
+		data = get_function_data(code);
 	}
 
 #ifdef PYTRACY_DEBUG
@@ -762,11 +873,32 @@ static void set_tracing_internal(PyTracyState& state)
 	{
 		assert(PyGILState_Check());
 
-		py::module threading_module = state.threading_module;
-		py::function setprofile = threading_module.attr("setprofile");
+		// py::module threading_module = state.threading_module;
+		// py::function setprofile = threading_module.attr("setprofile");
 
-		PyObject_CallFunctionObjArgs(setprofile.ptr(), state.on_trace_event_wrapped, NULL);
-		PyEval_SetProfile(on_trace_event, NULL);
+		// PyObject_CallFunctionObjArgs(setprofile.ptr(), state.on_trace_event_wrapped, NULL);
+		// PyEval_SetProfile(on_trace_event, NULL);
+
+		py::object monitoring = state.sys_module.attr("monitoring");
+
+		// Use tool ID 2 and tool name "pytracy"
+		monitoring.attr("use_tool_id")(2, "pytracy");
+
+		// Setup events: PY_START | PY_RETURN
+		py::object events_enum = monitoring.attr("events");
+		py::object evs = events_enum.attr("PY_START").operator|(events_enum.attr("PY_RETURN"));
+		monitoring.attr("set_events")(2, evs);
+
+		// Print current events for tool 2
+		// py::print(monitoring.attr("get_events")(2));
+
+		// Register the C++ functions as callbacks
+		// Need to wrap C++ callbacks with py::cpp_function
+		// monitoring.attr("register_callback")(2, events_enum.attr("PY_START"), py::cpp_function(on_call));
+		// monitoring.attr("register_callback")(2, events_enum.attr("PY_RETURN"), py::cpp_function(on_return));
+
+		monitoring.attr("register_callback")(2, events_enum.attr("PY_START"), state.on_call_wrapped);
+		monitoring.attr("register_callback")(2, events_enum.attr("PY_RETURN"), state.on_return_wrapped);
 	}
 	else
 	{
@@ -866,4 +998,7 @@ PYBIND11_MODULE(pytracy, m, py::mod_gil_not_used()) {
 
 	// Initialize the state
 	PyTracyState& state = PyTracyState::the();
+// #ifdef PYTRACY_PROFILE
+	// TracyEnableSampling();
+// #endif
 };
