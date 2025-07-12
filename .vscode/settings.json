@@ -2,6 +2,13 @@
     "files.associations": {
         "string_view": "cpp",
         "system_error": "cpp",
-        "regex": "cpp"
+        "regex": "cpp",
+        "shared_mutex": "cpp",
+        "stdexcept": "cpp",
+        "deque": "cpp",
+        "string": "cpp",
+        "vector": "cpp",
+        "atomic": "cpp",
+        "condition_variable": "cpp"
     }
 }

@@ -5,6 +5,17 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "type": "lldb",
+            "request": "launch",
+            "name": "lldb ++",
+            "program": "/home/jakub/Desktop/pytracy/venv/bin/python",
+            "args": [
+                "/home/jakub/Desktop/boardBot/game.py",
+                // "tests/test_library_integrations.py",
+                "10000000"],
+            "cwd": "${workspaceFolder}"
+        },
+        {
             "name": "(gdb) Launch",
             "type": "cppdbg",
             "request": "launch",

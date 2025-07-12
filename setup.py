@@ -41,7 +41,7 @@ class CMakeBuildExt(build_ext):
 		# Change directory to Tracy repository
 		os.chdir('tracy')
 
-		run(['git', 'checkout', 'v0.11.1'])
+		run(['git', 'checkout', 'v0.12.2'])
 
 		# Run cmake so that it generates shared libraries
 		# Compile with flags -fPIC -Wl and --no-undefined
@@ -113,8 +113,8 @@ class CMakeBuildExt(build_ext):
 				extra_compile_args.extend(["-O0", "-g3"])
 				extra_link_args.extend(["-O0", "-g3"])
 
-				extra_compile_args.extend(["-fsanitize=address", "-fsanitize=undefined"])
-				extra_link_args.extend(["-fsanitize=address", "-fsanitize=undefined"])
+				# extra_compile_args.extend(["-fsanitize=address", "-fsanitize=undefined"])
+				# extra_link_args.extend(["-fsanitize=address", "-fsanitize=undefined"])
 			else:
 				raise Exception("Unsupported OS")
 
