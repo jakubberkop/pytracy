@@ -1,25 +1,9 @@
-import pytracy
-pytracy.enable_tracing(True)
-# pytracy.set_filtered_out_folders([])
 from typing import List
 import unittest
 
-def on_call(*args):
-	print("CALL:  ", args)
-
-def on_return(*args):
-	print("RETURN:", args)
-
-# import sys
-# sys.monitoring.use_tool_id(2, "pytracy")
-# evs = sys.monitoring.events.PY_START | sys.monitoring.events.PY_RETURN
-# sys.monitoring.set_events(2, evs)
-
-# print(sys.monitoring.get_events(2))
-
-# sys.monitoring.register_callback(2, sys.monitoring.events.PY_START, on_call)
-# sys.monitoring.register_callback(2, sys.monitoring.events.PY_RETURN, on_return)
-
+import pytracy
+pytracy.enable_tracing(True)
+pytracy.set_filtered_out_folders([])
 
 
 class Threads(unittest.TestCase):
@@ -38,12 +22,12 @@ class Threads(unittest.TestCase):
 			pass
 
 		def worker(_: int):
-			for _ in range(2):
+			for _ in range(1000):
 				test_function()
 
 		threads: List[threading.Thread] = []
 
-		for i in range(10):
+		for i in range(100):
 			t = threading.Thread(target=worker, args=(i,))
 			threads.append(t)
 
