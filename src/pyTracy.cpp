@@ -575,70 +575,72 @@ static ProcessedFunctionData* get_function_data(PyCodeObject* code)
 		state.function_data[code] = data;
 	}
 
-{
-	// TODO(Performance): Is this required?
-	py::gil_scoped_acquire acquire;
+	{
+		// TODO(Performance): Is this required?
+		py::gil_scoped_acquire acquire;
 
-	assert(PyGILState_Check());
+		assert(PyGILState_Check());
 
-	// This is done on purpose, as we need to keep code alive for the entire program lifetime
-	// This way we can be sure that the pointer is always valid
-	Py_INCREF(code);
+		// This is done on purpose, as we need to keep code alive for the entire program lifetime
+		// This way we can be sure that the pointer is always valid
+		Py_INCREF(code);
 
-	Py_ssize_t file_name_len;
-	Py_ssize_t func_name_len;
-	Py_ssize_t qual_name_len;
+		Py_ssize_t file_name_len;
+		Py_ssize_t func_name_len;
+		Py_ssize_t qual_name_len;
 
-	const char* file_name = PyUnicode_AsUTF8AndSize(code->co_filename, &file_name_len);
-	const char* func_name = PyUnicode_AsUTF8AndSize(code->co_name, &func_name_len);
-	const char* qual_name = PyUnicode_AsUTF8AndSize(code->co_qualname, &qual_name_len);
+		const char* file_name = PyUnicode_AsUTF8AndSize(code->co_filename, &file_name_len);
+		const char* func_name = PyUnicode_AsUTF8AndSize(code->co_name, &func_name_len);
+		const char* qual_name = PyUnicode_AsUTF8AndSize(code->co_qualname, &qual_name_len);
 
-	uint32_t line = code->co_firstlineno;
+		uint32_t line = code->co_firstlineno;
 
-	assert(file_name != 0);
-	assert(func_name != 0);
-	assert(qual_name != 0);
+		assert(file_name != 0);
+		assert(func_name != 0);
+		assert(qual_name != 0);
 
-	std::string full_qual_name;
-PyFrameObject* frame = PyEval_GetFrame();
-	py::handle f_back = py::handle((PyObject*)frame);
-	py::object module = py::none{};
+		std::string full_qual_name;
 
-	try {
-		ZoneScopedN("inspect_getmodule");
-		module = state.inspect_getmodule(f_back);
-	} catch(...) {
-		// At shutdown, getmodule can throw an exception
-			}
+		PyFrameObject* frame = PyEval_GetFrame();
 
-	if (module.is_none()) {
-		full_qual_name = std::string(qual_name, (size_t)qual_name_len);
-	} else {
-		py::str module_name = module.attr("__name__");
-		full_qual_name = module_name.cast<std::string>() + "." + std::string(qual_name, (size_t)qual_name_len);
-	}
+		py::handle f_back = py::handle((PyObject*)frame);
+		py::object module = py::none{};
 
-	full_qual_name = replace_all(full_qual_name, ".", "::");
+		try {
+			ZoneScopedN("inspect_getmodule");
+			module = state.inspect_getmodule(f_back);
+		} catch(...) {
+			// At shutdown, getmodule can throw an exception
+				}
 
-	py::gil_scoped_release release2;
+		if (module.is_none()) {
+			full_qual_name = std::string(qual_name, (size_t)qual_name_len);
+		} else {
+			py::str module_name = module.attr("__name__");
+			full_qual_name = module_name.cast<std::string>() + "." + std::string(qual_name, (size_t)qual_name_len);
+		}
 
-	std::string_view file_name_str(file_name, file_name_len);
-	bool is_filtered_out = !is_path_acceptable(file_name_str, state.filter_list);
+		full_qual_name = replace_all(full_qual_name, ".", "::");
 
-		data->line = line;
-	data->file_name = file_name;
-	data->func_name = func_name;
-	data->full_qual_name = std::move(full_qual_name);  // Use move to avoid copy
-	data->is_filtered_out_internal = is_filtered_out;
-	data->is_filtered_out_dirty = false;
+		py::gil_scoped_release release2;
 
-	data->tracy_source_location = TracySourceLocationData{
-		.name = data->func_name.c_str(),
-		.function = data->full_qual_name.c_str(),
-		.file = data->file_name.c_str(),
-		.line = data->line,
-		.color = 0
-	};
+		std::string_view file_name_str(file_name, file_name_len);
+		bool is_filtered_out = !is_path_acceptable(file_name_str, state.filter_list);
+
+			data->line = line;
+		data->file_name = file_name;
+		data->func_name = func_name;
+		data->full_qual_name = std::move(full_qual_name);  // Use move to avoid copy
+		data->is_filtered_out_internal = is_filtered_out;
+		data->is_filtered_out_dirty = false;
+
+		data->tracy_source_location = TracySourceLocationData{
+			.name = data->func_name.c_str(),
+			.function = data->full_qual_name.c_str(),
+			.file = data->file_name.c_str(),
+			.line = data->line,
+			.color = 0
+		};
 	}
 
 	// Mark initialization complete
@@ -753,7 +755,12 @@ int on_trace_event(PyObject* obj, PyFrameObject* frame, int what, PyObject *arg)
 			print_stack(*thread_data, "Befor pop");
 #endif
 
-			assert(thread_data->tracy_stack.size());
+			if (thread_data->tracy_stack.size() == 0)
+			{
+				// This means that we are in the interpreter shutdown
+				enable_tracing(false);
+				return 0;
+			}
 
 			const auto stack_data = thread_data->tracy_stack.back();
 			thread_data->tracy_stack.pop_back();
