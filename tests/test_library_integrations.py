@@ -1,17 +1,18 @@
+import time
 import unittest
 import pytracy
 
+pytracy.enable_tracing(True)
+pytracy.set_filtered_out_folders([])
+
+import numpy as np
+import pandas as pd
+
 class LibraryIntegrations(unittest.TestCase):
-	def setUp(self) -> None:
-		pytracy.enable_tracing(True)
-		return super().setUp()
-	
-	def tearDown(self) -> None:
-		pytracy.enable_tracing(False)
-		return super().tearDown()
 
 	def test_numpy_integration(self):
-		import numpy as np
+		print("ASD")
+
 		a = [j for j in [i for i in range(10)]]
 
 		a = np.random.rand(100, 100)
@@ -32,7 +33,7 @@ class LibraryIntegrations(unittest.TestCase):
 		# TODO: verify recorded data
 
 	def test_dataframe_integration(self):
-		import pandas as pd
+
 
 		df = pd.DataFrame({
 			'col1': [1, 2],
@@ -48,4 +49,6 @@ class LibraryIntegrations(unittest.TestCase):
 		df.sum(axis=1)
 
 if __name__ == '__main__':
+	import time
+	time.sleep(4)
 	unittest.main()

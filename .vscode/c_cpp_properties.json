@@ -5,7 +5,7 @@
             "includePath": [
                 "${workspaceFolder}/**",
                 "${workspaceFolder}/pybind11/include",
-                "C:/Users/Jakub/AppData/Local/Programs/Python/Python311/include/"
+                "/mnt/c/Users/Jakub/Desktop/cpython/Include/"
             ],
             "defines": [
                 "_DEBUG",

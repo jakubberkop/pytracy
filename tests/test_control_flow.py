@@ -1,14 +1,16 @@
 import unittest
 import pytracy
 
+pytracy.enable_tracing(True)
+
 class ControlFlow(unittest.TestCase):
 
 	def setUp(self) -> None:
-		pytracy.enable_tracing(True)
+		# pytracy.enable_tracing(True)
 		return super().setUp()
 	
 	def tearDown(self) -> None:
-		pytracy.enable_tracing(False)
+		# pytracy.enable_tracing(False)
 		return super().tearDown()
 
 	def test_function_call(self):

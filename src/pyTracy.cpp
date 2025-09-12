@@ -53,6 +53,12 @@ void pytracy_zone_end(TracyCZoneCtx ctx)
 
 #endif
 
+#if PY_VERSION_HEX >= 0x030C0000
+#define PYTRACY_USE_SYS_PROFILING 1
+#else
+#define PYTRACY_USE_SYS_PROFILING 0
+#endif
+
 #define PYBIND11_DETAILED_ERROR_MESSAGES 0
 #include <pybind11/pybind11.h>
 
@@ -103,7 +109,10 @@ struct ThreadData
 #endif
 };
 
+#if PYTRACY_USE_SYS_PROFILING
+#else
 PyObject* on_trace_event_wrapper_c(PyObject *self, PyObject *const *args, Py_ssize_t nargs);
+#endif
 
 enum class TracingMode
 {
@@ -113,6 +122,22 @@ enum class TracingMode
 
 struct PyTracyState;
 static void initialize_filtering(PyTracyState& state);
+
+int on_trace_event(PyObject* obj, PyFrameObject* frame, int what, PyObject *arg);
+
+static ThreadData* get_current_thread_data(PyFrameObject* frame, bool& just_initialized);
+static ThreadData* get_current_thread_data_impl(PyFrameObject* frame, bool& just_initialized);
+static TracySourceLocationData* get_source_index_from_code(PyCodeObject* code, bool& is_active);
+static ProcessedFunctionData* get_function_data(PyCodeObject* code);
+static bool update_should_be_filtered_out(ProcessedFunctionData* data);
+static void initialize_call_stack(PyFrameObject* frame, ThreadData* thread_data);
+
+static PyObject* on_enter_c(PyObject *self, PyObject *const *args, Py_ssize_t nargs);
+static PyObject* on_exit_c(PyObject *self, PyObject *const *args, Py_ssize_t nargs);
+
+static void set_tracing_internal(PyTracyState& state);
+
+static void print_stack(ThreadData& thread, std::string operation);
 
 struct PyTracyState
 {
@@ -131,11 +156,18 @@ struct PyTracyState
 	py::module os_module;
 	py::module sys_module;
 	py::module inspect_module;
+
+#if PYTRACY_USE_SYS_PROFILING
+	py::handle on_enter_wrapped;
+	py::handle on_exit_wrapped;
+#else
 	py::module threading_module;
+	py::handle on_trace_event_wrapped;
+#endif
+
 	py::object inspect_currentframe;
 	py::object inspect_getmodule;
 
-	py::handle on_trace_event_wrapped;
 
 #ifdef PYTRACY_DEBUG
 	std::ofstream global_stack_file{"global_stack.txt"};
@@ -167,10 +199,34 @@ struct PyTracyState
 		os_module = py::module::import("os");
 		sys_module = py::module::import("sys");
 		inspect_module = py::module::import("inspect");
-		threading_module = py::module::import("threading");
-
 		inspect_currentframe = inspect_module.attr("currentframe");
 		inspect_getmodule =  inspect_module.attr("getmodule");
+
+#if PYTRACY_USE_SYS_PROFILING
+
+		PyMethodDef* on_enter_wrapped_method = new PyMethodDef{
+			"on_enter_wrapped_method",
+			(PyCFunction)on_enter_c,
+			METH_FASTCALL,
+			nullptr
+		};
+
+		PyMethodDef* on_exit_wrapped_method = new PyMethodDef{
+			"on_exit_wrapped_method",
+			(PyCFunction)on_exit_c,
+			METH_FASTCALL,
+			nullptr
+		};
+
+		
+		on_enter_wrapped = py::handle(PyCFunction_New(on_enter_wrapped_method, nullptr));
+		on_enter_wrapped.inc_ref();
+
+		on_exit_wrapped = py::handle(PyCFunction_New(on_exit_wrapped_method, nullptr));
+		on_exit_wrapped.inc_ref();
+
+#else
+		threading_module = py::module::import("threading");
 
 		PyMethodDef* on_trace_event_wrapper_method = new PyMethodDef{
 			"on_trace_event_wrapper",
@@ -181,6 +237,7 @@ struct PyTracyState
 
 		on_trace_event_wrapped = py::handle(PyCFunction_New(on_trace_event_wrapper_method, nullptr));
 		on_trace_event_wrapped.inc_ref();
+#endif
 
 		initialize_filtering(*this);
 	}
@@ -189,6 +246,77 @@ struct PyTracyState
 
 PyTracyState* PyTracyState::instance = nullptr;
 std::atomic<bool> PyTracyState::during_initialization = false;
+
+PyObject* on_enter_c(PyObject *self, PyObject *const *args, Py_ssize_t nargs)
+{
+	PyCodeObject* code = (PyCodeObject*)args[0];
+
+	assert(nargs == 4);
+
+	ProcessedFunctionData* data = get_function_data((PyCodeObject*)code);
+
+	bool just_initialized;
+	ThreadData* thread_data = get_current_thread_data(nullptr, just_initialized);
+
+	bool is_active = !update_should_be_filtered_out(data);
+	TracySourceLocationData* source_index = &data->tracy_source_location;
+
+
+	// If we are just initializing the stack, we don't want to push the current frame.
+	// This leads to a duplicate entry in the stack
+	if (!just_initialized)
+	{
+		TracyCZoneCtx ctx = pytracy_zone_start(source_index, is_active);
+#ifdef PYTRACY_DEBUG
+		thread_data->tracy_stack.push_back({ctx, is_active, data});
+#else
+		thread_data->tracy_stack.push_back({ctx, is_active});
+#endif
+	}
+
+#ifdef PYTRACY_DEBUG
+	thread_data->is_during_event = false;
+	print_stack(*thread_data, "After push");
+#endif
+
+	Py_INCREF(Py_None);
+	Py_RETURN_NONE;
+}
+
+py::none enable_tracing(bool enable);
+
+PyObject* on_exit_c(PyObject *self, PyObject *const *args, Py_ssize_t nargs)
+{
+	bool _;
+	ThreadData* thread_data = get_current_thread_data(nullptr, _);
+
+#ifdef PYTRACY_DEBUG
+	assert(!thread_data->is_during_event);
+	thread_data->is_during_event = true;
+	print_stack(*thread_data, "Befor pop");
+#endif
+
+	if (thread_data->tracy_stack.size() == 0)
+	{
+		printf("Hit 0!\n");
+		enable_tracing(false);
+
+		Py_INCREF(Py_None);
+		Py_RETURN_NONE;	
+	}
+
+	const auto stack_data = thread_data->tracy_stack.back();
+	thread_data->tracy_stack.pop_back();
+	pytracy_zone_end(stack_data.tracyCtx);
+
+#ifdef PYTRACY_DEBUG
+	print_stack(*thread_data, "After pop");
+	thread_data->is_during_event = false;
+#endif
+
+	Py_INCREF(Py_None);
+	Py_RETURN_NONE;
+}
 
 #ifdef PYTRACY_DEBUG
 
@@ -203,7 +331,7 @@ void _print_stack(ThreadData& thread, std::string operation, std::ostream& file)
 	file << std::flush;
 }
 
-void print_stack(ThreadData& thread, std::string operation)
+static void print_stack(ThreadData& thread, std::string operation)
 {
 	PyTracyState& state = PyTracyState::the();
 
@@ -309,15 +437,11 @@ static void initialize_filtering(PyTracyState& state)
 	internal_set_filtering_mode(true, true, false, state);
 }
 
-static void initialize_call_stack(PyFrameObject* frame, ThreadData* thread_data);
-
 static thread_local ThreadData* current_thread_data = nullptr;
-static ThreadData* get_current_thread_data(PyFrameObject* frame, bool& just_initialized);
-static ThreadData* get_current_thread_data_impl(PyFrameObject* frame, bool& just_initialized);
-
 static ThreadData* get_current_thread_data(PyFrameObject* frame, bool& just_initialized)
 {
 	ZoneScoped;
+	assert(!frame);
 
 	if(current_thread_data)
 	{
@@ -369,6 +493,13 @@ static ThreadData* get_current_thread_data_impl(PyFrameObject* frame, bool& just
 	assert(thread_data);
 	{
 		py::gil_scoped_acquire acquire;
+
+#ifdef PYTRACY_USE_SYS_PROFILING
+		PyFrameObject* frame = PyEval_GetFrame();
+#else
+		assert(frame);
+#endif
+
 		initialize_call_stack(frame, thread_data);
 	}
 
@@ -389,7 +520,8 @@ namespace std
 	};
 }
 
-ProcessedFunctionData* get_function_data(PyFrameObject* frame)
+// Code can be PyCodeObject* or a callable PyObject*
+static ProcessedFunctionData* get_function_data(PyCodeObject* code)
 {
 	ZoneScoped;
 
@@ -397,31 +529,37 @@ ProcessedFunctionData* get_function_data(PyFrameObject* frame)
 
 	PyTracyState& state = PyTracyState::the();
 
-	ProcessedFunctionData* data = nullptr;
-	PyCodeObject* code = PyFrame_GetCode(frame);
+	ProcessedFunctionData* data;
 
+	// Fast path: Check if data exists and is ready (most common case)
 	{
-		state.function_data_mutex.lock_shared();
+		std::shared_lock lock(state.function_data_mutex);
 		auto it = state.function_data.find(code);
-		bool did_found = it != state.function_data.end();
-		state.function_data_mutex.unlock_shared();
-
-		if (did_found)
-		{
-			data = it->second;
-
-			// Another thread might be already initializing the data
-			// Wait until it's done
-			ZoneScopedN("wait_for_initialization");
-
+		if (it != state.function_data.end()) [[likely]] {
+			ProcessedFunctionData* data = it->second;
+			
+			// Quick check if initialization is complete
 #ifdef __cpp_lib_atomic_wait
-			while (data->during_initialization.test())
-			{
+			if (!data->during_initialization.test()) [[likely]] {
+				return data;  // Fast return for the common case
+			}
+#else
+			if (!data->during_initialization ) [[likely]] {
+				return data;  // Fast return for the common case
+			}
+#endif
+			
+			// Data exists but still initializing - need to wait
+			lock.unlock();  // Release shared lock before waiting
+			
+			ZoneScopedN("wait_for_initialization");
+#ifdef __cpp_lib_atomic_wait
+			while (data->during_initialization.test()) {
 				data->during_initialization.wait(true);
 			}
 #else
-			std::unique_lock lock(data->during_initialization_mtx);
-			data->during_initialization_cv.wait(lock, [&data] { return !data->during_initialization; });
+			std::unique_lock wait_lock(data->during_initialization_mtx);
+			data->during_initialization_cv.wait(wait_lock, [data] { return !data->during_initialization; });
 #endif
 			return data;
 		}
@@ -437,6 +575,7 @@ ProcessedFunctionData* get_function_data(PyFrameObject* frame)
 		state.function_data[code] = data;
 	}
 
+{
 	// TODO(Performance): Is this required?
 	py::gil_scoped_acquire acquire;
 
@@ -461,27 +600,20 @@ ProcessedFunctionData* get_function_data(PyFrameObject* frame)
 	assert(qual_name != 0);
 
 	std::string full_qual_name;
-
+PyFrameObject* frame = PyEval_GetFrame();
 	py::handle f_back = py::handle((PyObject*)frame);
 	py::object module = py::none{};
 
-	try
-	{
+	try {
 		ZoneScopedN("inspect_getmodule");
 		module = state.inspect_getmodule(f_back);
-	}
-	catch(...)
-	{
+	} catch(...) {
 		// At shutdown, getmodule can throw an exception
-		// Best course of action is to ignore it, since module name is not critical
-	}
+			}
 
-	if (module.is_none())
-	{
+	if (module.is_none()) {
 		full_qual_name = std::string(qual_name, (size_t)qual_name_len);
-	}
-	else
-	{
+	} else {
 		py::str module_name = module.attr("__name__");
 		full_qual_name = module_name.cast<std::string>() + "." + std::string(qual_name, (size_t)qual_name_len);
 	}
@@ -493,11 +625,10 @@ ProcessedFunctionData* get_function_data(PyFrameObject* frame)
 	std::string_view file_name_str(file_name, file_name_len);
 	bool is_filtered_out = !is_path_acceptable(file_name_str, state.filter_list);
 
-	// This purposefully leaks memory, as it has to be kept alive for the entire program lifetime
-	data->line = line;
+		data->line = line;
 	data->file_name = file_name;
 	data->func_name = func_name;
-	data->full_qual_name = full_qual_name;
+	data->full_qual_name = std::move(full_qual_name);  // Use move to avoid copy
 	data->is_filtered_out_internal = is_filtered_out;
 	data->is_filtered_out_dirty = false;
 
@@ -508,7 +639,9 @@ ProcessedFunctionData* get_function_data(PyFrameObject* frame)
 		.line = data->line,
 		.color = 0
 	};
+	}
 
+	// Mark initialization complete
 #ifdef __cpp_lib_atomic_wait
 	data->during_initialization.clear();
 	data->during_initialization.notify_all();
@@ -523,7 +656,7 @@ ProcessedFunctionData* get_function_data(PyFrameObject* frame)
 	return data;
 }
 
-bool update_should_be_filtered_out(ProcessedFunctionData* data)
+static bool update_should_be_filtered_out(ProcessedFunctionData* data)
 {
 	ZoneScoped;
 
@@ -533,7 +666,7 @@ bool update_should_be_filtered_out(ProcessedFunctionData* data)
 
 	PyTracyState& state = PyTracyState::the();
 
-	if (data->is_filtered_out_dirty.load())
+	if (data->is_filtered_out_dirty.load()) [[likely]] 
 	{
 		data->is_filtered_out_internal = !is_path_acceptable(data->file_name, state.filter_list);
 		data->is_filtered_out_dirty.store(false);
@@ -542,12 +675,12 @@ bool update_should_be_filtered_out(ProcessedFunctionData* data)
 	return data->is_filtered_out_internal;
 }
 
-static TracySourceLocationData* get_source_index_from_frame(PyFrameObject* frame, bool& is_active)
+static TracySourceLocationData* get_source_index_from_code(PyCodeObject* code, bool& is_active)
 {
 	ZoneScoped;
 	assert(!PyGILState_Check());
 
-	ProcessedFunctionData* data = get_function_data(frame);
+	ProcessedFunctionData* data = get_function_data(code);
 	is_active = !update_should_be_filtered_out(data);
 	return &data->tracy_source_location;
 }
@@ -571,18 +704,17 @@ int on_trace_event(PyObject* obj, PyFrameObject* frame, int what, PyObject *arg)
 			ThreadData* thread_data = get_current_thread_data(frame, just_initialized);
 
 			bool is_active = false;
-			TracySourceLocationData* source_index = get_source_index_from_frame(frame, is_active);
+			PyCodeObject* code = PyFrame_GetCode(frame);
+			TracySourceLocationData* source_index = get_source_index_from_code(code, is_active);
 
 			ProcessedFunctionData* data = nullptr;
 
 #ifdef PYTRACY_DEBUG
 			// Return value: New reference.
 			// Return a strong reference.
-			PyCodeObject* code = PyFrame_GetCode(frame);
 			assert(!thread_data->is_during_event);
 			thread_data->is_during_event = true;
-			data = get_function_data(code, frame);
-			Py_DECREF(code);
+			data = get_function_data(code);
 #endif
 
 			// If we are just initializing the stack, we don't want to push the current frame.
@@ -647,6 +779,8 @@ int on_trace_event(PyObject* obj, PyFrameObject* frame, int what, PyObject *arg)
 	return 0;
 }
 
+#if PYTRACY_USE_SYS_PROFILING
+#else
 // typedef PyObject *(*PyCFunction)(PyObject *, PyObject *);
 PyObject* on_trace_event_wrapper_c(PyObject *self, PyObject *const *args, Py_ssize_t nargs)
 {
@@ -703,6 +837,7 @@ PyObject* on_trace_event_wrapper_c(PyObject *self, PyObject *const *args, Py_ssi
 		Py_RETURN_NONE;
 	}
 }
+#endif
 
 static void initialize_call_stack(PyFrameObject* frame, ThreadData* thread_data)
 {
@@ -727,8 +862,9 @@ static void initialize_call_stack(PyFrameObject* frame, ThreadData* thread_data)
 
 	{
 		py::gil_scoped_release release;
-		source_index = get_source_index_from_frame(frame, is_active);
-		data = get_function_data(frame);
+		auto* code = PyFrame_GetCode(frame);
+		source_index = get_source_index_from_code(code, is_active);
+		data = get_function_data(code);
 	}
 
 #ifdef PYTRACY_DEBUG
@@ -752,14 +888,52 @@ static void set_tracing_internal(PyTracyState& state)
 	// TODO: Consider mode changes during runtime
 	if (state.tracing_mode == TracingMode::Disabled)
 	{
+
+#if PYTRACY_USE_SYS_PROFILING
+		py::object monitoring = state.sys_module.attr("monitoring");
+		py::object events_enum = monitoring.attr("events");
+		py::object register_callback = monitoring.attr("register_callback");
+		py::object free_tool_id = monitoring.attr("free_tool_id");
+		py::object PROFILER_ID = monitoring.attr("PROFILER_ID");
+
+		register_callback(2, events_enum.attr("PY_START"), py::none());
+		register_callback(2, events_enum.attr("PY_RESUME"), py::none());
+		register_callback(2, events_enum.attr("PY_RETURN"), py::none());
+		register_callback(2, events_enum.attr("PY_UNWIND"), py::none());
+		register_callback(2, events_enum.attr("PY_YIELD"), py::none());
+		monitoring.attr("set_events")(2, 0);
+		
+		free_tool_id(2);
+#else
 		py::module threading_module = state.threading_module;
 		py::function setprofile = threading_module.attr("setprofile");
 
 		setprofile(py::none());
 		PyEval_SetProfile(NULL, NULL);
+#endif
+
 	}
 	else if (state.tracing_mode == TracingMode::All)
 	{
+#if PYTRACY_USE_SYS_PROFILING
+		py::object monitoring = state.sys_module.attr("monitoring");
+		py::object PROFILER_ID = monitoring.attr("PROFILER_ID");
+
+		monitoring.attr("use_tool_id")(PROFILER_ID, "pytracy");
+
+		py::object events_enum = monitoring.attr("events");
+		py::object evs = events_enum.attr("PY_START") | events_enum.attr("PY_RESUME") | events_enum.attr("PY_RETURN") | events_enum.attr("PY_UNWIND") | events_enum.attr("PY_YIELD");
+
+		monitoring.attr("set_events")(PROFILER_ID, evs);
+
+		auto register_callback = monitoring.attr("register_callback");
+		register_callback(2, events_enum.attr("PY_START"), state.on_enter_wrapped);
+		register_callback(2, events_enum.attr("PY_RESUME"), state.on_enter_wrapped);
+		register_callback(2, events_enum.attr("PY_RETURN"), state.on_exit_wrapped);
+		register_callback(2, events_enum.attr("PY_UNWIND"), state.on_exit_wrapped);
+		register_callback(2, events_enum.attr("PY_YIELD"), state.on_exit_wrapped);
+
+#else
 		assert(PyGILState_Check());
 
 		py::module threading_module = state.threading_module;
@@ -767,6 +941,8 @@ static void set_tracing_internal(PyTracyState& state)
 
 		PyObject_CallFunctionObjArgs(setprofile.ptr(), state.on_trace_event_wrapped, NULL);
 		PyEval_SetProfile(on_trace_event, NULL);
+#endif
+
 	}
 	else
 	{
@@ -855,6 +1031,12 @@ py::none enable_tracing(bool enable)
 	return py::none();
 }
 
+py::none pytracy_log_message(const std::string& message)
+{
+	TracyMessage(message.c_str(), message.length());
+	return py::none();
+}
+
 PYBIND11_MODULE(pytracy, m, py::mod_gil_not_used()) {
 	m.doc() = "Tracy Profiler bindings for Python";
 	m.def("enable_tracing", &enable_tracing, "Sets Tracy Profiler tracing mode");
@@ -863,6 +1045,7 @@ PYBIND11_MODULE(pytracy, m, py::mod_gil_not_used()) {
 	m.def("get_filtered_out_folders", &get_filtered_out_folders, "Returns a list of filtered out folders");
 
 	m.def("set_filtering_mode", &set_filtering_mode, "Sets the filtering mode for the profiler");
+	m.def("log", &pytracy_log_message, "Log a message using TracyMessage api");
 
 	// Initialize the state
 	PyTracyState& state = PyTracyState::the();
