@@ -53,14 +53,14 @@ void pytracy_zone_end(TracyCZoneCtx ctx)
 
 #endif
 
+#define PYBIND11_DETAILED_ERROR_MESSAGES 0
+#include <pybind11/pybind11.h>
+
 #if PY_VERSION_HEX >= 0x030C0000
 #define PYTRACY_USE_SYS_PROFILING 1
 #else
 #define PYTRACY_USE_SYS_PROFILING 0
 #endif
-
-#define PYBIND11_DETAILED_ERROR_MESSAGES 0
-#include <pybind11/pybind11.h>
 
 namespace py = pybind11;
 
