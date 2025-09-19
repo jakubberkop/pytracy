@@ -24,7 +24,7 @@ jobs:
     runs-on: windows-2022
     strategy:
       matrix:
-        python-version: ["3.11", "3.12", "3.13", "3.13t"]
+        python-version: ["3.11", "3.12", "3.13", "3.13t", "3.14", "3.14t"]
 
     steps:
     - uses: actions/checkout@v4.2.2
@@ -32,9 +32,10 @@ jobs:
         submodules: true
 
     - name: Setup Python
-      uses: quansight-labs/setup-python@b9ab292c751a42bcd2bb465b7fa202ea2c3f5796 # v5.3.1
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
+        allow-prereleases: true
 
     - name: Install dependencies
       run: pip install build
