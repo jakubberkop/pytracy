@@ -64,8 +64,6 @@ jobs:
 
     - name: Build wheels
       run: python -m cibuildwheel --output-dir wheelhouse
-      env:
-        CIBW_FREE_THREADED_SUPPORT: 1
 
     - uses: actions/upload-artifact@v4
       with:
