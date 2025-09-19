@@ -16,7 +16,6 @@ classifiers = [
 [build-system]
 requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
-requires-python = ">=3.9.0"
 
 [tool.setuptools]
 license-files = ["LICENSE.txt", "extra/THIRD_PARTY_LICENSES.txt"]
