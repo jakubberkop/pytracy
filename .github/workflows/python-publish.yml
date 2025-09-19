@@ -42,8 +42,9 @@ jobs:
     - name: Build wheels
       run: pip wheel . --no-deps --wheel-dir dist
 
-    - uses: actions/upload-artifact@v3
+    - uses: actions/upload-artifact@v4
       with:
+        name: wheel-windows-${{ matrix.python-version }}
         path: dist
 
   build_wheels_linux:
@@ -65,9 +66,10 @@ jobs:
       env:
         CIBW_FREE_THREADED_SUPPORT: 1
 
-    - uses: actions/upload-artifact@v3
+    - uses: actions/upload-artifact@v4
       with:
         path: ./wheelhouse/*.whl
+        name: wheel-linux
 
   upload_all:
     needs: [build_wheels_windows, build_wheels_linux]
@@ -78,10 +80,11 @@ jobs:
     if: github.event_name == 'release'
 
     steps:
-    - uses: actions/download-artifact@v3
+    - uses: actions/download-artifact@v4
       with:
-        name: artifact
+        pattern: wheel-*
         path: dist
+        merge-multiple: true
 
     - name: Set up Python
       uses: actions/setup-python@v5.3.0
